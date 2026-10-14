@@ -48,7 +48,9 @@ target_compile_options(gta4_recomp PRIVATE ${gta4_options})
 target_compile_definitions(gta4_recomp PRIVATE ${gta4_definitions})
 # As on the desktop: the start-up registrar is one very large straight-line
 # function, which optimizing takes the most memory of anything here
-set_source_files_properties(${gta4}/generated/gta4_register.cpp PROPERTIES COMPILE_OPTIONS -O0)
+# (without the precompiled header, which was built optimized)
+set_source_files_properties(${gta4}/generated/gta4_register.cpp PROPERTIES COMPILE_OPTIONS -O0
+	SKIP_PRECOMPILE_HEADERS ON)
 
 # --- The app ----------------------------------------------------------------------
 set(gta4_app_sources
