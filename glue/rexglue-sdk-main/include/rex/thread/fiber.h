@@ -23,6 +23,9 @@
 #include <ucontext.h>
 #include <cstdint>
 #include <vector>
+#elif REX_PLATFORM_PS5
+#include <cstdint>
+#include <vector>
 #endif
 
 namespace rex::thread {
@@ -56,6 +59,16 @@ struct Fiber {
 #if REX_PLATFORM_WIN32
   void* handle_ = nullptr;
   bool is_thread_fiber_ = false;
+#elif REX_PLATFORM_PS5
+  // The console's makecontext does not make a context its swapcontext can
+  // enter (fiber_ps5.cpp): a fiber is a saved stack pointer instead.
+  void* sp_ = nullptr;
+  std::vector<uint8_t> stack_;
+  void (*entry_)(void*) = nullptr;
+  void* arg_ = nullptr;
+  bool is_thread_fiber_ = false;
+
+  static void Trampoline();
 #elif REX_PLATFORM_IOS || REX_PLATFORM_ANDROID || REX_PLATFORM_NX
   alignas(16) unsigned char jmpbuf_[512]{};
   void* stack_ = nullptr;

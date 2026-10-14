@@ -9,7 +9,20 @@
 #include <mutex>
 #include <unordered_map>
 
+#include <rex/platform.h>
+#if REX_PLATFORM_PS5
+#include <chrono>
+namespace {
+// Milliseconds since an arbitrary start, as SDL_GetTicks counts them
+uint64_t SDL_GetTicks() {
+  return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now().time_since_epoch())
+                      .count());
+}
+}  // namespace
+#else
 #include <SDL3/SDL_timer.h>
+#endif
 #include <rex/input/input_trace.h>
 #include <rex/runtime.h>
 

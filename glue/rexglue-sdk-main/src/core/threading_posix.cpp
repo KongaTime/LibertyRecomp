@@ -9,7 +9,7 @@
 #include <rex/platform.h>
 #include <rex/thread.h>
 
-static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only");
+static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC || REX_PLATFORM_PS5, "This file is POSIX-only");
 
 #include <signal.h>
 
@@ -24,7 +24,20 @@ static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only")
 
 #include <pthread.h>
 #include <semaphore.h>
+#if !REX_PLATFORM_PS5
 #include <sys/eventfd.h>
+#endif
+#if REX_PLATFORM_PS5
+// PS5: FreeBSD's thread extensions, and the platform layer's affinity calls
+// (FreeBSD's 32-byte cpuset_t gets ERANGE from the console's own;
+// PS5_PayloadSDK platform/docs/PROBE.md, "Threads").
+#include <pthread_np.h>
+#include <sys/cpuset.h>
+
+#include <ps5platform/libc.h>
+#include <rex/memory/utils.h>
+#endif
+
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -33,6 +46,7 @@ static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only")
 #include <rex/assert.h>
 #include <rex/chrono/chrono_steady_cast.h>
 #include <rex/logging.h>
+#include <rex/string.h>
 #include <rex/thread/timer_queue.h>
 
 #include <sched.h>
@@ -86,6 +100,21 @@ void AndroidShutdown() {
 }
 #endif
 
+// Ends the calling thread. On the PS5 its C++ thread_local destructors run
+// first, through the payload SDK's ps5_pthread_exit: libkernel runs a thread's
+// key destructors in no set order, and emulated TLS frees the thread's storage
+// from one of them, so a thread_local destructor left to its key can work on
+// freed memory (a game thread ending in ExTerminateThread crashed in a
+// thread_local std::map's destructor after 43 minutes of play, 2026-10-12). A
+// thread whose start routine returns has them run by the SDK already.
+[[noreturn]] static void ExitCurrentThread(void* value) {
+#if REX_PLATFORM_PS5
+  ps5_pthread_exit(value);
+#else
+  pthread_exit(value);
+#endif
+}
+
 template <typename _Rep, typename _Period>
 inline timespec DurationToTimeSpec(std::chrono::duration<_Rep, _Period> duration) {
   auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(duration);
@@ -110,13 +139,41 @@ enum class SignalType {
 };
 
 int GetSystemSignal(SignalType num) {
+#if REX_PLATFORM_PS5
+  // macOS has no realtime signals (SIGRTMIN..SIGRTMAX); map the runtime's
+  // signals onto the two user-defined signals. The PS5's headers define
+  // SIGRTMIN, but delivery of realtime signals to a chosen thread is unproven
+  // on the console, and these two are all the runtime needs.
+  switch (num) {
+    case SignalType::kThreadSuspend:
+      return SIGUSR1;
+    case SignalType::kThreadUserCallback:
+      return SIGUSR2;
+    default:
+      assert_unhandled_case(num);
+      return SIGUSR1;
+  }
+#else
   auto result = SIGRTMIN + static_cast<int>(num);
   assert_true(result < SIGRTMAX);
   return result;
+#endif  // REX_PLATFORM_PS5
 }
 
 SignalType GetSystemSignalType(int num) {
+#if REX_PLATFORM_PS5
+  switch (num) {
+    case SIGUSR1:
+      return SignalType::kThreadSuspend;
+    case SIGUSR2:
+      return SignalType::kThreadUserCallback;
+    default:
+      assert_unhandled_case(num);
+      return SignalType::kThreadSuspend;
+  }
+#else
   return static_cast<SignalType>(num - SIGRTMIN);
+#endif  // REX_PLATFORM_PS5
 }
 
 std::array<std::atomic<bool>, static_cast<size_t>(SignalType::k_Count)> signal_handler_installed =
@@ -145,7 +202,11 @@ void EnableAffinityConfiguration() {}
 // uint64_t ticks() { return mach_absolute_time(); }
 
 uint32_t current_thread_system_id() {
+#if REX_PLATFORM_PS5
+  return static_cast<uint32_t>(pthread_getthreadid_np());
+#else
   return static_cast<uint32_t>(syscall(SYS_gettid));
+#endif  // REX_PLATFORM_PS5
 }
 
 void MaybeYield() {
@@ -593,11 +654,25 @@ class PosixCondition<Thread> : public PosixConditionBase {
     pthread_attr_t attr;
     if (pthread_attr_init(&attr) != 0)
       return false;
+#if REX_PLATFORM_PS5
+    // A stack pthread_create maps is charged to the title's flexible budget
+    // (448 MiB, PS5_PayloadSDK's PROBE.md), which a game's 16 MiB thread stacks
+    // used up within five threads (C0000017, 2026-10-12): every stack is direct
+    // memory instead (memory_ps5.cpp), with a no-access guard below it
+    if (!AllocateStack(params.stack_size) ||
+        pthread_attr_setstack(&attr, stack_, params.stack_size) != 0) {
+      REXLOG_ERROR("PS5: no {} KiB stack for a new thread", params.stack_size / 1024);
+      FreeStack();
+      pthread_attr_destroy(&attr);
+      return false;
+    }
+#else
     if (pthread_attr_setstacksize(&attr, params.stack_size) != 0) {
       pthread_attr_destroy(&attr);
       return false;
     }
-    if (params.initial_priority != 0) {
+#endif
+    if (params.initial_priority != 0 && !REX_PLATFORM_PS5) {
       sched_param sched{};
       sched.sched_priority = params.initial_priority + 1;
       if (pthread_attr_setschedpolicy(&attr, SCHED_FIFO) != 0) {
@@ -609,13 +684,44 @@ class PosixCondition<Thread> : public PosixConditionBase {
         return false;
       }
     }
-    if (pthread_create(&thread_, &attr, ThreadStartRoutine, start_data) != 0) {
+    if (const int error = pthread_create(&thread_, &attr, ThreadStartRoutine, start_data); error != 0) {
+#if REX_PLATFORM_PS5
+      REXLOG_ERROR("PS5: pthread_create failed ({})", error);
+      FreeStack();
+#endif
       pthread_attr_destroy(&attr);
       return false;
     }
     pthread_attr_destroy(&attr);
     return true;
   }
+
+#if REX_PLATFORM_PS5
+  static constexpr size_t kStackGuard = 0x10000;
+
+  bool AllocateStack(size_t size) {
+    size = (size + kStackGuard - 1) & ~(kStackGuard - 1);
+    void* base = rex::memory::AllocFixed(nullptr, size + kStackGuard, rex::memory::AllocationType::kReserve,
+                                         rex::memory::PageAccess::kNoAccess);
+    if (!base) {
+      return false;
+    }
+    stack_reservation_ = base;
+    stack_reservation_size_ = size + kStackGuard;
+    stack_ = static_cast<uint8_t*>(base) + kStackGuard;
+    return rex::memory::AllocFixed(stack_, size, rex::memory::AllocationType::kCommit,
+                                   rex::memory::PageAccess::kReadWrite) != nullptr;
+  }
+
+  void FreeStack() {
+    if (stack_reservation_) {
+      rex::memory::DeallocFixed(stack_reservation_, stack_reservation_size_,
+                                rex::memory::DeallocationType::kRelease);
+    }
+    stack_reservation_ = nullptr;
+    stack_ = nullptr;
+  }
+#endif
 
   /// Constructor for existing thread. This should only happen once called by
   /// Thread::GetCurrentThread() on the main thread
@@ -635,6 +741,12 @@ class PosixCondition<Thread> : public PosixConditionBase {
     // Match Canary/Edge behavior.
     // Force-cancel/join from the condition destructor can self-join/crash
     // depending on shutdown ordering, so threads must be stopped explicitly.
+#if REX_PLATFORM_PS5
+    // Its stack goes once the thread has ended; a thread still running keeps it
+    if (state_ == State::kFinished) {
+      FreeStack();
+    }
+#endif
   }
 
   bool Signal() override { return true; }
@@ -656,6 +768,9 @@ class PosixCondition<Thread> : public PosixConditionBase {
         std::lock_guard<std::mutex> lock(android_pre_api_26_name_mutex_);
         rex::string::copy_truncating(result.data(), android_pre_api_26_name_, result.size());
       }
+#elif REX_PLATFORM_PS5
+      // PS5: the SDK declares no pthread_getname_np; the name set_name gave.
+      rex::string::copy_truncating(result.data(), ps5_name_, result.size());
 #else
       if (pthread_getname_np(thread_, result.data(), result.size() - 1) != 0) {
         assert_always();
@@ -669,10 +784,17 @@ class PosixCondition<Thread> : public PosixConditionBase {
     WaitStarted();
     std::unique_lock<std::mutex> lock(state_mutex_);
     if (state_ != State::kUninitialized && state_ != State::kFinished) {
+#if REX_PLATFORM_PS5
+      // PS5: FreeBSD's name call is libkernel's; pthread_setname_np is only
+      // in a module a title does not load.
+      pthread_set_name_np(thread_, std::string(name).c_str());
+      rex::string::copy_truncating(ps5_name_, name, std::size(ps5_name_));
+#else
       pthread_setname_np(thread_, std::string(name).c_str());
 #if REX_PLATFORM_ANDROID
       SetAndroidPreApi26Name(name);
 #endif
+#endif  // REX_PLATFORM_PS5
     }
   }
 
@@ -687,10 +809,31 @@ class PosixCondition<Thread> : public PosixConditionBase {
   }
 #endif
 
+#if REX_PLATFORM_PS5
+  // PS5: pthread_t is a pointer; the kernel's id, which the thread records as
+  // it starts (ThreadStartRoutine), is what the console's logs name.
+  uint32_t system_id() const { return ps5_thread_id_.load(std::memory_order_acquire); }
+#else
   uint32_t system_id() const { return static_cast<uint32_t>(thread_); }
+#endif  // REX_PLATFORM_PS5
 
   uint64_t affinity_mask() {
     WaitStarted();
+#if REX_PLATFORM_PS5
+    // A title's threads run on CPUs 0 to 12 (PROBE.md, "Threads").
+    cpuset_t cpu_set;
+    CPU_ZERO(&cpu_set);
+    if (ps5_pthread_getaffinity_np(thread_, sizeof(cpu_set), &cpu_set) != 0) {
+      assert_always();
+    }
+    uint64_t result = 0;
+    for (auto i = 0u; i < 64 && i < CPU_SETSIZE; i++) {
+      if (CPU_ISSET(i, &cpu_set)) {
+        result |= uint64_t(1) << i;
+      }
+    }
+    return result;
+#else
     cpu_set_t cpu_set;
 #if REX_PLATFORM_ANDROID
     if (sched_getaffinity(pthread_gettid_np(thread_), sizeof(cpu_set_t), &cpu_set) != 0) {
@@ -708,10 +851,23 @@ class PosixCondition<Thread> : public PosixConditionBase {
       result |= set << i;
     }
     return result;
+#endif  // REX_PLATFORM_PS5
   }
 
   void set_affinity_mask(uint64_t mask) {
     WaitStarted();
+#if REX_PLATFORM_PS5
+    cpuset_t cpu_set;
+    CPU_ZERO(&cpu_set);
+    for (auto i = 0u; i < 64 && i < CPU_SETSIZE; i++) {
+      if (mask & (1ULL << i)) {
+        CPU_SET(i, &cpu_set);
+      }
+    }
+    if (ps5_pthread_setaffinity_np(thread_, sizeof(cpu_set), &cpu_set) != 0) {
+      assert_always();
+    }
+#else
     cpu_set_t cpu_set;
     CPU_ZERO(&cpu_set);
     for (auto i = 0u; i < 64; i++) {
@@ -728,6 +884,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
       assert_always();
     }
 #endif
+#endif  // REX_PLATFORM_PS5
   }
 
   int priority() {
@@ -743,6 +900,14 @@ class PosixCondition<Thread> : public PosixConditionBase {
   }
 
   void set_priority(int new_priority) {
+#if REX_PLATFORM_PS5
+    // A guest's priorities (ReX's desktop 0..32, SCHED_FIFO) are outside the
+    // console's (256..767, smaller is higher), where a FIFO thread at the top can
+    // starve the rest: threads keep the priority they were created with, as the
+    // Simpsons port's do
+    (void)new_priority;
+    return;
+#endif
     WaitStarted();
     sched_param param{};
     param.sched_priority = new_priority;
@@ -779,6 +944,12 @@ class PosixCondition<Thread> : public PosixConditionBase {
       return;
     }
 
+#if REX_PLATFORM_PS5
+    // macOS has no sigqueue/pthread_sigqueue; pthread_kill delivers the signal
+    // without the sigval payload. The PS5 has no pthread_sigqueue, and its
+    // sigqueue is FreeBSD's, aimed at a process; the handler needs no payload.
+    int result = pthread_kill(thread_, GetSystemSignal(SignalType::kThreadUserCallback));
+#else
     sigval value{};
     value.sival_ptr = this;
 #if REX_PLATFORM_ANDROID
@@ -787,6 +958,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
 #else
     int result = pthread_sigqueue(thread_, GetSystemSignal(SignalType::kThreadUserCallback), value);
 #endif
+#endif  // REX_PLATFORM_PS5
     if (result != 0) {
       REXSYS_WARN("QueueUserCallback: signal delivery failed ({})", result);
     }
@@ -886,7 +1058,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
       cond_.notify_all();
     }
     if (is_current_thread) {
-      pthread_exit(reinterpret_cast<void*>(exit_code));
+      ExitCurrentThread(reinterpret_cast<void*>(exit_code));
     } else {
 #if REX_PLATFORM_ANDROID
       if (pthread_kill(thread_, GetSystemSignal(SignalType::kThreadTerminate)) != 0) {
@@ -925,6 +1097,11 @@ class PosixCondition<Thread> : public PosixConditionBase {
     sem_destroy(&suspend_sem_);
   }
   pthread_t thread_;
+#if REX_PLATFORM_PS5
+  void* stack_reservation_ = nullptr;
+  size_t stack_reservation_size_ = 0;
+  void* stack_ = nullptr;
+#endif
   bool signaled_;
   int exit_code_;
   State state_;             // Protected by state_mutex_
@@ -935,6 +1112,10 @@ class PosixCondition<Thread> : public PosixConditionBase {
   mutable std::condition_variable state_signal_;
   std::deque<std::function<void()>> user_callbacks_;
   std::atomic<bool> has_pending_user_callbacks_{false};
+#if REX_PLATFORM_PS5
+  char ps5_name_[16] = {};
+  std::atomic<uint32_t> ps5_thread_id_{0};
+#endif
 #if REX_PLATFORM_ANDROID
   // Name accessible via name() on Android before API 26 which added
   // pthread_getname_np.
@@ -1309,6 +1490,10 @@ void* PosixCondition<Thread>::ThreadStartRoutine(void* parameter) {
 
   current_thread_ = thread;
   current_thread_condition_ = &thread->handle_;
+#if REX_PLATFORM_PS5
+  thread->handle_.ps5_thread_id_.store(static_cast<uint32_t>(pthread_getthreadid_np()),
+                                       std::memory_order_release);
+#endif
   {
     std::unique_lock<std::mutex> lock(thread->handle_.state_mutex_);
     thread->handle_.suspend_count_ = create_suspended ? 1 : 0;
@@ -1385,19 +1570,23 @@ void Thread::Exit(int exit_code) {
     current_thread_->Terminate(exit_code);
   } else {
     // Should only happen with the main thread
-    pthread_exit(reinterpret_cast<void*>(exit_code));
+    ExitCurrentThread(reinterpret_cast<void*>(exit_code));
   }
   // Function must not return
   assert_always();
 }
 
 void set_current_thread_name(const std::string_view name) {
+#if REX_PLATFORM_PS5
+  pthread_set_name_np(pthread_self(), std::string(name).c_str());
+#else
   pthread_setname_np(pthread_self(), std::string(name).c_str());
 #if REX_PLATFORM_ANDROID
   if (!android_pthread_getname_np_ && current_thread_) {
     current_thread_->condition().SetAndroidPreApi26Name(name);
   }
 #endif
+#endif  // REX_PLATFORM_PS5
 }
 
 static void signal_handler(int signal, siginfo_t* /*info*/, void* /*context*/) {

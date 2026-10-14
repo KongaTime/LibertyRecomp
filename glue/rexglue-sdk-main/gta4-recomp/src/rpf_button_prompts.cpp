@@ -13,7 +13,10 @@
 #include <string_view>
 #include <vector>
 
+#include <rex/platform.h>
+#if !REX_PLATFORM_PS5
 #include <SDL3/SDL.h>
+#endif
 
 #include <rex/crypto/sha256.h>
 #include <rex/filesystem.h>
@@ -403,6 +406,11 @@ std::string Lowercase(std::string_view value) {
 }
 
 std::string SelectVariant() {
+#if REX_PLATFORM_PS5
+  // The console's pad is a DualSense
+  REXLOG_INFO("Button prompts: PS5 -> ps5");
+  return "ps5";
+#else
   SDL_UpdateGamepads();
   int count = 0;
   SDL_JoystickID* gamepads = SDL_GetGamepads(&count);
@@ -454,9 +462,19 @@ std::string SelectVariant() {
   REXLOG_INFO("Button prompts: SDL controller '{}' type={} -> {}", name, static_cast<int>(type),
               variant);
   return variant;
+#endif
 }
 
 std::optional<std::filesystem::path> FindAsset(std::string_view variant) {
+#if REX_PLATFORM_PS5
+  // Staged beside eboot.bin by ps5/CMakeLists.txt
+  const auto title_assets =
+      std::filesystem::path("/app0/button_prompts") / variant / "buttons_360.xtd";
+  std::error_code title_error;
+  if (std::filesystem::is_regular_file(title_assets, title_error)) {
+    return title_assets;
+  }
+#endif
   const auto executable_assets = rex::filesystem::GetExecutableFolder().parent_path() /
                                  "Resources" / "button_prompts" / variant / "buttons_360.xtd";
   std::error_code error;

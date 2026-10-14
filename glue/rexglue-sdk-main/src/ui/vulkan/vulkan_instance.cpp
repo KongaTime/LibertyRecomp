@@ -37,12 +37,58 @@ REXCVAR_DEFINE_BOOL(vulkan_moltenvk_synchronous_queue_submits, false, "UI/Vulkan
                     "Process Vulkan queue submissions synchronously in MoltenVK");
 #endif
 
+#if REX_PLATFORM_PS5
+// The PS5's Vulkan driver is RADV, linked into the title (PS5_Vulkan's
+// libvulkan_radeon.ps5.a): no loader library, no layers. Its entry is the ICD
+// one. The PS5 blocks below are ported from TheSimpsonsGame-PS5-Builder
+// (LoZazaMastro and contributors), tools/rexglue-sdk/src/ui/vulkan/
+// vulkan_instance.cpp at 59e7086, BSD 3-Clause License (see LICENSE).
+#include <cstring>
+
+#include <rex/ui/vulkan/display_prospero.h>
+
+extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(VkInstance instance,
+                                                                             const char* name);
+
+namespace {
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL ProsperoGetInstanceProcAddr(VkInstance instance,
+                                                                     const char* name) {
+  if (!name) {
+    return nullptr;
+  }
+  if (auto function = vk_icdGetInstanceProcAddr(instance, name)) {
+    return function;
+  }
+  // RADV's entrypoint tables may keep only the extension spellings of commands
+  // promoted to Vulkan 1.1. Both spellings have identical signatures.
+  constexpr const char* aliases[][2] = {
+      {"vkGetPhysicalDeviceFeatures2", "vkGetPhysicalDeviceFeatures2KHR"},
+      {"vkGetPhysicalDeviceProperties2", "vkGetPhysicalDeviceProperties2KHR"},
+      {"vkGetPhysicalDeviceMemoryProperties2", "vkGetPhysicalDeviceMemoryProperties2KHR"},
+  };
+  for (const auto& alias : aliases) {
+    if (std::strcmp(name, alias[0]) == 0) {
+      return vk_icdGetInstanceProcAddr(instance, alias[1]);
+    }
+  }
+  return nullptr;
+}
+}  // namespace
+#endif
+
 namespace rex {
 namespace ui {
 namespace vulkan {
 
 std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
                                                        const bool try_enable_validation) {
+#if REX_PLATFORM_PS5
+  // The output request, before RADV opens VideoOut.
+  if (!InitializeProsperoDisplayPolicy()) {
+    return nullptr;
+  }
+#endif
+
   std::unique_ptr<VulkanInstance> vulkan_instance(new VulkanInstance());
 
   // Load the RenderDoc API if connected.
@@ -54,6 +100,11 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   Functions& ifn = vulkan_instance->functions_;
 
   bool functions_loaded = true;
+#if REX_PLATFORM_PS5
+  // No loader library: RADV is linked in. vkDestroyInstance is resolved once
+  // the instance exists (below).
+  ifn.vkGetInstanceProcAddr = ProsperoGetInstanceProcAddr;
+#else
   bool loader_loaded = false;
 #if REX_PLATFORM_MAC
   const MacOSVulkanRuntimePaths macos_runtime_paths = DetectMacOSVulkanRuntimePaths();
@@ -101,6 +152,7 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
     REXLOG_ERROR("Failed to get Vulkan loader function pointers");
     return nullptr;
   }
+#endif  // REX_PLATFORM_PS5
 
   // Load global functions.
 
@@ -109,9 +161,12 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   functions_loaded &= (ifn.vkEnumerateInstanceExtensionProperties =
                            PFN_vkEnumerateInstanceExtensionProperties(ifn.vkGetInstanceProcAddr(
                                nullptr, "vkEnumerateInstanceExtensionProperties"))) != nullptr;
-  functions_loaded &=
-      (ifn.vkEnumerateInstanceLayerProperties = PFN_vkEnumerateInstanceLayerProperties(
-           ifn.vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceLayerProperties"))) != nullptr;
+  // An ICD without a loader need not enumerate layers; the PS5 uses none.
+  ifn.vkEnumerateInstanceLayerProperties = PFN_vkEnumerateInstanceLayerProperties(
+      ifn.vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceLayerProperties"));
+#if !REX_PLATFORM_PS5
+  functions_loaded &= ifn.vkEnumerateInstanceLayerProperties != nullptr;
+#endif
   if (!functions_loaded) {
     REXLOG_ERROR(
         "Failed to get Vulkan global function pointers via "
@@ -160,6 +215,10 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
     requested_extensions.emplace(
         "VK_EXT_swapchain_colorspace",
         &vulkan_instance->extensions_.ext_EXT_swapchain_colorspace);
+#if REX_PLATFORM_PS5
+    // #3: RADV's VideoOut WSI.
+    requested_extensions.emplace("VK_KHR_display", &vulkan_instance->extensions_.ext_KHR_display);
+#endif
 #ifdef VK_USE_PLATFORM_XCB_KHR
     // #6.
     requested_extensions.emplace("VK_KHR_xcb_surface",
@@ -247,9 +306,15 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   // vector.
   std::unordered_map<std::string, bool*> requested_layers;
   bool layer_khronos_validation = false;
+#if REX_PLATFORM_PS5
+  if (try_enable_validation) {
+    REXLOG_WARN("Vulkan validation layers need a layer loader; the PS5's RADV has none");
+  }
+#else
   if (try_enable_validation) {
     requested_layers.emplace("VK_LAYER_KHRONOS_validation", &layer_khronos_validation);
   }
+#endif
 
   std::vector<const char*> enabled_layers;
 
@@ -450,6 +515,13 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
                          vulkan_instance->dlss_unavailable_reason_);
   check_dlss_extensions(dlss_fg_requirements, vulkan_instance->dlss_fg_extensions_enabled_,
                          vulkan_instance->dlss_fg_unavailable_reason_);
+#if REX_PLATFORM_PS5
+  // vkDestroyInstance is an instance command; an ICD need not return it for a
+  // null instance. Resolve it only after vkCreateInstance succeeds.
+  ifn.vkDestroyInstance = PFN_vkDestroyInstance(
+      ifn.vkGetInstanceProcAddr(vulkan_instance->instance_, "vkDestroyInstance"));
+  functions_loaded &= ifn.vkDestroyInstance != nullptr;
+#endif
 
   // Load instance functions.
 
@@ -503,6 +575,11 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   if (vulkan_instance->extensions_.ext_KHR_surface) {
 #include <rex/ui/vulkan/functions/instance_khr_surface.inc>
   }
+#if REX_PLATFORM_PS5
+  if (vulkan_instance->extensions_.ext_KHR_display) {
+#include <rex/ui/vulkan/functions/instance_khr_display.inc>
+  }
+#endif
   if (vulkan_instance->extensions_.ext_EXT_debug_utils) {
 #include <rex/ui/vulkan/functions/instance_ext_debug_utils.inc>
   }
@@ -598,10 +675,15 @@ VulkanInstance::~VulkanInstance() {
       functions_.vkDestroyDebugUtilsMessengerEXT(instance_, debug_utils_messenger_, nullptr);
     }
 
-    functions_.vkDestroyInstance(instance_, nullptr);
+    // Null on the PS5 when resolving it after vkCreateInstance failed.
+    if (functions_.vkDestroyInstance) {
+      functions_.vkDestroyInstance(instance_, nullptr);
+    }
   }
 
+#if !REX_PLATFORM_PS5
   loader_.Close();
+#endif
 }
 
 void VulkanInstance::EnumeratePhysicalDevices(

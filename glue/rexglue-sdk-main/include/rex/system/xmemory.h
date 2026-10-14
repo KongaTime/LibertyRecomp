@@ -32,8 +32,9 @@ namespace rex::memory::detail {
 /// Compensates for Windows 64KB allocation granularity on the 0xE0 physical heap.
 /// The backing file maps the 0xE0 heap at a 0x1000-byte offset, but MapViewOfFileEx
 /// rounds down to 64KB boundaries. Linux mmap handles 4KB offsets natively.
+/// The PS5 maps at 64KB granularity too (memory_ps5.cpp's kUnit), so it takes the offset.
 constexpr u32 PhysicalHostOffset([[maybe_unused]] u32 guest_addr) noexcept {
-#if REX_PLATFORM_WIN32 || REX_PLATFORM_MAC
+#if REX_PLATFORM_WIN32 || REX_PLATFORM_MAC || REX_PLATFORM_PS5
   return (guest_addr >= 0xE0000000u) ? 0x1000u : 0u;
 #else
   return 0u;
@@ -335,6 +336,20 @@ class Memory {
   // mapping to the file system fails.
   bool Initialize();
 
+  // A host that keeps the guest's memory itself, with its own kernel and
+  // allocator, lends it to the GPU instead (a recompilation that is not a
+  // ReXGlue app). Nothing is reserved, mapped or kept
+  // in heaps here. virtual_membase is the guest's 4 GB range;
+  // physical_membase a view of its 512 MB of physical memory the host never
+  // protects. EnablePhysicalMemoryAccessCallbacks calls watch with the
+  // physical range, and the host reports a CPU write to a watched range with
+  // NotifyExternalPhysicalWrite, after which it is no longer watched.
+  typedef void (*ExternalWatchFunction)(void* context, uint32_t physical_address,
+                                        uint32_t length);
+  bool InitializeExternal(uint8_t* virtual_membase, uint8_t* physical_membase,
+                          ExternalWatchFunction watch, void* watch_context);
+  void NotifyExternalPhysicalWrite(uint32_t physical_address, uint32_t length);
+
   // Resets all memory to zero and resets all allocations.
   void Reset();
 
@@ -589,6 +604,10 @@ class Memory {
   rex::thread::global_critical_region global_critical_region_;
   std::vector<std::pair<PhysicalMemoryInvalidationCallback, void*>*>
       physical_memory_invalidation_callbacks_;
+
+  // InitializeExternal's host
+  ExternalWatchFunction external_watch_ = nullptr;
+  void* external_watch_context_ = nullptr;
 };
 
 }  // namespace rex::memory

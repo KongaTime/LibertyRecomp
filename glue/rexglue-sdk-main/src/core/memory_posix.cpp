@@ -34,8 +34,20 @@
 
 #include <linux/ashmem.h>
 
+
 // TODO(tomc): Android or maybe na. idk
 // #include "xenia/base/main_android.h"
+#endif
+
+// FreeBSD's (the PS5's) off_t and struct stat are 64-bit, with no *64 variants.
+#if REX_PLATFORM_PS5
+#define stat64 stat
+#define fstat64 fstat
+#define off64_t off_t
+#define ftruncate64 ftruncate
+#define mmap64 mmap
+#define fseeko64 fseeko
+#define ftello64 ftello
 #endif
 
 namespace rex {

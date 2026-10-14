@@ -140,12 +140,16 @@ function(rexgpu_configure_plugin target export_name)
     endif()
 endfunction()
 
+# PS5: a title loads no shared library. GTA IV draws through gta4-native, which
+# is linked into the title (below), so the emulated Xenos plugin is left out.
+if(NOT PROSPERO)
 add_library(rexgpu-xenos SHARED
     plugin_main.cpp
     ${REXGPU_XENOS_SOURCES}
 )
 add_library(rex::gpu-xenos ALIAS rexgpu-xenos)
 rexgpu_configure_plugin(rexgpu-xenos gpu-xenos)
+endif()
 
 if(REXGLUE_USE_VULKAN)
     if(REXGLUE_BUILD_TESTS)
@@ -276,7 +280,12 @@ if(REXGLUE_USE_VULKAN)
             "${CMAKE_CURRENT_BINARY_DIR}/gta4_native_zstd")
     endif()
 
-    add_library(rexgpu-gta4-native SHARED
+    if(PROSPERO)
+        set(REXGPU_GTA4_NATIVE_LIBRARY_TYPE STATIC)
+    else()
+        set(REXGPU_GTA4_NATIVE_LIBRARY_TYPE SHARED)
+    endif()
+    add_library(rexgpu-gta4-native ${REXGPU_GTA4_NATIVE_LIBRARY_TYPE}
         gta4_native/graphics_system.cpp
         gta4_native/core/font_atlas.cpp
         gta4_native/shader_override_policy.h
@@ -309,6 +318,15 @@ if(REXGLUE_USE_VULKAN)
     endif()
     add_library(rex::gpu-gta4-native ALIAS rexgpu-gta4-native)
     rexgpu_configure_plugin(rexgpu-gta4-native gpu-gta4-native)
+    if(PROSPERO)
+        # Linked into the title, which registers these two entry points under the
+        # plugin's file name (rex::platform::RegisterStaticLibrary), where
+        # LoadGpuPlugin's DynamicLibrary finds them
+        set_source_files_properties(gta4_native/plugin_main.cpp PROPERTIES COMPILE_DEFINITIONS
+            "rex_gpu_abi_version=rex_gpu_gta4_native_abi_version;rex_gpu_create=rex_gpu_gta4_native_create")
+        set_target_properties(rexgpu-gta4-native PROPERTIES
+            ARCHIVE_OUTPUT_DIRECTORY ${REXGLUE_ROOT}/out/ps5-amd64)
+    endif()
     target_include_directories(rexgpu-gta4-native PRIVATE
         "${GTA4_NATIVE_SHADER_CACHE_ROOT}"
         "${GTA4_NATIVE_SMOLV_ROOT}"

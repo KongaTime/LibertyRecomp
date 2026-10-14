@@ -24,12 +24,27 @@
 #include <rex/filesystem.h>
 #include <rex/logging.h>
 #include <rex/platform/env.h>
+#include <rex/platform.h>
+#if REX_PLATFORM_PS5
+#include <rex/ui/startup_prospero.h>
+#endif
 #include <rex/string.h>
 
 #include <dirent.h>
 #include <ftw.h>
 #include <libgen.h>
 #include <pwd.h>
+
+// FreeBSD's (the PS5's) off_t and struct stat are 64-bit, with no *64 variants.
+#if REX_PLATFORM_PS5
+#define stat64 stat
+#define fstat64 fstat
+#define off64_t off_t
+#define ftruncate64 ftruncate
+#define mmap64 mmap
+#define fseeko64 fseeko
+#define ftello64 ftello
+#endif
 
 namespace rex {
 
@@ -52,6 +67,10 @@ std::filesystem::path to_path(const std::u16string_view source) {
 namespace filesystem {
 
 std::filesystem::path GetExecutablePath() {
+#if REX_PLATFORM_PS5
+  // No /proc on the console: a title is /app0/eboot.bin
+  return std::filesystem::path("/app0") / "eboot.bin";
+#endif
   char buff[FILENAME_MAX] = "";
   readlink("/proc/self/exe", buff, FILENAME_MAX);
   std::string s(buff);
@@ -63,6 +82,11 @@ std::filesystem::path GetExecutableFolder() {
 }
 
 std::filesystem::path GetUserFolder() {
+#if REX_PLATFORM_PS5
+  // The title's state folder (/app0 unless the title names another; see
+  // rex/ui/startup_prospero.h), not HOME or the passwd entry
+  return std::filesystem::path(prospero_state_root()) / "userdata";
+#endif
   // get preferred data home
   if (auto xdg = rex::platform::env::get("XDG_DATA_HOME")) {
     return std::filesystem::path(*xdg);
@@ -236,13 +260,20 @@ std::vector<FileInfo> ListFiles(const std::filesystem::path& path) {
     FileInfo info;
 
     info.name = ent->d_name;
-    struct stat st;
-    stat((path / info.name).c_str(), &st);
+    // An entry stat cannot describe is left out rather than listed from an
+    // uninitialized stat, and its type comes from stat when the directory
+    // gives none (DT_UNKNOWN, as the PS5's file systems may; the Simpsons
+    // port's filesystem_posix.cpp found the same)
+    struct stat st {};
+    if (stat((path / info.name).c_str(), &st) != 0) {
+      continue;
+    }
     info.create_timestamp = convertUnixtimeToWinFiletime(st.st_ctime);
     info.access_timestamp = convertUnixtimeToWinFiletime(st.st_atime);
     info.write_timestamp = convertUnixtimeToWinFiletime(st.st_mtime);
     info.path = path;
-    if (ent->d_type == DT_DIR) {
+    const bool directory = ent->d_type == DT_UNKNOWN ? S_ISDIR(st.st_mode) : ent->d_type == DT_DIR;
+    if (directory) {
       info.type = FileInfo::Type::kDirectory;
       info.total_size = 0;
     } else {

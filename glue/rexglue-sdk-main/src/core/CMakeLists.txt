@@ -89,7 +89,6 @@ elseif(UNIX)
         ${REXCORE_POSIX_FIBER}
         mapped_memory_posix.cpp
         math_gcc.cpp
-        memory_posix.cpp
         platform/console_posix.cpp
         platform/env_posix.cpp
         seh_posix.cpp
@@ -97,6 +96,16 @@ elseif(UNIX)
         system_posix.cpp
         threading_posix.cpp
     )
+    if(PROSPERO)
+        # PS5: fibers are a stack switch of their own (fiber_posix.cpp builds
+        # nothing there; the console's makecontext is unusable), and memory is
+        # direct memory (memory_ps5.cpp; POSIX shared memory would be charged to
+        # the title's small flexible budget)
+        target_sources(rexcore PRIVATE fiber_ps5.cpp memory_ps5.cpp startup_ps5.cpp
+            fault_prospero.cpp abort_prospero.cpp)
+    else()
+        target_sources(rexcore PRIVATE memory_posix.cpp)
+    endif()
 endif()
 
 # Title graphics settings are registered once in the shared runtime.
@@ -134,6 +143,9 @@ endif()
 
 if(APPLE)
     target_link_libraries(rexcore PRIVATE pthread)
+elseif(PROSPERO)
+    # PS5: pthreads are in the SDK's libc and libkernel, which the compiler
+    # wrapper links; there is no librt or libdl.
 elseif(UNIX)
     target_link_libraries(rexcore PRIVATE pthread rt dl)
 endif()

@@ -56,7 +56,9 @@ std::vector<platform::DynamicLibrary>& LoadedPlugins() {
 
 std::unique_ptr<IGraphicsSystem> LoadGpuPlugin(std::string_view name, std::string_view backend) {
   auto path = rex::filesystem::GetExecutableFolder() / PluginFileName(name);
-  if (!std::filesystem::exists(path)) {
+  // PS5: a title links its plugin in and registers it under this file name
+  // (rex::platform::RegisterStaticLibrary); there is no file to find
+  if (!REX_PLATFORM_PS5 && !std::filesystem::exists(path)) {
     REXSYS_ERROR(
         "GPU plugin '{}' not found at {}. Stage it next to the executable "
         "(GPU_PLUGINS {} in rexglue_configure_target).",

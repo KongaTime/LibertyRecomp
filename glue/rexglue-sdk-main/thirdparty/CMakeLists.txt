@@ -41,8 +41,11 @@ set(REQUIRED_SUBMODULES
     snappy
     utfcpp
     imgui
-    sdl3
 )
+if(NOT PROSPERO)
+    # PS5: no SDL; the window, sound and controller are ReXGlue's own PS5 ones
+    list(APPEND REQUIRED_SUBMODULES sdl3)
+endif()
 
 if(REXGLUE_USE_VULKAN)
     list(APPEND REQUIRED_SUBMODULES
@@ -304,7 +307,9 @@ if(UNIX AND NOT APPLE)
     set(SDL_PIPEWIRE_SHARED   ON  CACHE BOOL "" FORCE)
 endif()
 
-add_subdirectory(sdl3)
+if(NOT PROSPERO)
+    add_subdirectory(sdl3)
+endif()
 
 #=============================================================================
 # DXC API headers (vendored from DirectXShaderCompiler, runtime-loaded)
@@ -699,6 +704,13 @@ target_compile_options(libavcodec PRIVATE -w)  # Suppress warnings in third-part
 target_link_libraries(libavcodec PUBLIC libavutil)
 if(WIN32)
     target_link_libraries(libavcodec PRIVATE bcrypt)
+endif()
+
+# PS5: FFmpeg ships no configuration for the console; ffmpeg-overlay/ps5/config.h
+# is found ahead of FFmpeg's own config.h.
+if(PROSPERO)
+    target_include_directories(libavutil BEFORE PRIVATE "${FFMPEG_OVERLAY_SRC_DIR}/ps5")
+    target_include_directories(libavcodec BEFORE PRIVATE "${FFMPEG_OVERLAY_SRC_DIR}/ps5")
 endif()
 
 # Hidden visibility is required on aarch64. The NEON .S files use ADRP/ADD

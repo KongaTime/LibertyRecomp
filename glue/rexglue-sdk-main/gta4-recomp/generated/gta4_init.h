@@ -104,7 +104,7 @@ extern PPCFuncMapping PPCFuncMappings[];
 // Memory Access
 //=============================================================================
 
-#if REX_PLATFORM_WIN32 || REX_PLATFORM_MAC
+#if REX_PLATFORM_WIN32 || REX_PLATFORM_MAC || REX_PLATFORM_PS5
 #define REX_PHYS_HOST_OFFSET(addr) (((u32)(addr) >= 0xE0000000u) ? 0x1000u : 0u)
 #else
 #define REX_PHYS_HOST_OFFSET(addr) 0u

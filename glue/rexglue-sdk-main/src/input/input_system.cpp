@@ -23,6 +23,8 @@
 #include <rex/input/nop/nop_input_driver.h>
 #if REX_PLATFORM_NX
 #include "switch/switch_input_driver.h"
+#elif REX_PLATFORM_PS5
+#include <rex/input/prospero/prospero_input_driver.h>
 #else
 #include <rex/input/sdl/sdl_input_driver.h>
 #include <rex/input/xinput/xinput_input_driver.h>
@@ -356,6 +358,12 @@ std::unique_ptr<InputSystem> CreateDefaultInputSystem(bool tool_mode) {
 #if REX_PLATFORM_NX
     auto switch_driver = std::make_unique<nx::SwitchInputDriver>(nullptr, 0);
     if (switch_driver->Setup() == X_STATUS_SUCCESS) input->AddDriver(std::move(switch_driver));
+#elif REX_PLATFORM_PS5
+    // The DualSense through scePad; no SDL, keyboard or mouse on the console
+    auto pad_driver = std::make_unique<prospero::ProsperoInputDriver>(nullptr, 0);
+    if (pad_driver->Setup() == X_STATUS_SUCCESS) {
+      input->AddDriver(std::move(pad_driver));
+    }
 #else
     const bool expose_sdl_gamepad_state = REXCVAR_GET(input_backend) == "sdl";
     auto sdl_driver = std::make_unique<sdl::SDLInputDriver>(nullptr, 0, expose_sdl_gamepad_state);
@@ -365,7 +373,6 @@ std::unique_ptr<InputSystem> CreateDefaultInputSystem(bool tool_mode) {
       // controller device inventory.
       input->AddDriver(std::move(sdl_driver));
     }
-
 #if REX_PLATFORM_WIN32
     if (REXCVAR_GET(input_backend) == "xinput") {
       auto xinput_driver = std::make_unique<xinput::XinputInputDriver>(nullptr, 0);

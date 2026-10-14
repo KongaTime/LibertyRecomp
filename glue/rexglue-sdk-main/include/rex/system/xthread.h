@@ -11,6 +11,7 @@
  */
 
 #include <atomic>
+#include <cstring>
 #include <condition_variable>
 #include <mutex>
 #include <string>
@@ -381,6 +382,54 @@ class XThread : public XObject {
   X_STATUS Delay(uint32_t processor_mode, uint32_t alertable, uint64_t interval);
 
   rex::thread::Thread* thread() { return thread_.get(); }
+#if REX_PLATFORM_PS5
+  // The last hook or kernel export this thread entered, and how many it has
+  // (rex::system::NoteThreadCall, for the PS5's stall dumps)
+  void NoteCall(const char* name) noexcept {
+    last_call_.store(name, std::memory_order_relaxed);
+    const uint64_t n = call_count_.fetch_add(1, std::memory_order_relaxed);
+    call_ring_[n % kCallRing].store(name, std::memory_order_relaxed);
+  }
+  // The last kCallRing calls, oldest first
+  std::string recent_calls() const {
+    const uint64_t n = call_count_.load(std::memory_order_relaxed);
+    std::string text;
+    for (uint64_t i = n > kCallRing ? n - kCallRing : 0; i < n; ++i) {
+      const char* name = call_ring_[i % kCallRing].load(std::memory_order_relaxed);
+      if (!name) {
+        continue;
+      }
+      if (std::strncmp(name, "__imp__", 7) == 0) {
+        name += 7;
+      }
+      if (!text.empty()) {
+        text += ' ';
+      }
+      text += name;
+    }
+    return text;
+  }
+  const char* last_call() const noexcept { return last_call_.load(std::memory_order_relaxed); }
+  uint64_t call_count() const noexcept { return call_count_.load(std::memory_order_relaxed); }
+  // The wait this thread is in, if any (NtWaitForSingleObjectEx): the handle,
+  // the object's type and guest address, and the timeout in 100 ns units as the
+  // guest gives it (negative: relative; kNoWaitTimeout: none)
+  static constexpr int64_t kNoWaitTimeout = INT64_MIN;
+  void NoteWait(uint32_t handle, uint32_t type, uint32_t guest_object, int64_t timeout) noexcept {
+    wait_handle_.store(handle, std::memory_order_relaxed);
+    wait_type_.store(type, std::memory_order_relaxed);
+    wait_object_.store(guest_object, std::memory_order_relaxed);
+    wait_timeout_.store(timeout, std::memory_order_relaxed);
+    waiting_.store(true, std::memory_order_release);
+  }
+  void NoteWaitDone() noexcept { waiting_.store(false, std::memory_order_release); }
+  bool waiting() const noexcept { return waiting_.load(std::memory_order_acquire); }
+  uint32_t wait_handle() const noexcept { return wait_handle_.load(std::memory_order_relaxed); }
+  uint32_t wait_type() const noexcept { return wait_type_.load(std::memory_order_relaxed); }
+  uint32_t wait_object() const noexcept { return wait_object_.load(std::memory_order_relaxed); }
+  int64_t wait_timeout() const noexcept { return wait_timeout_.load(std::memory_order_relaxed); }
+  const std::string& thread_name() const { return thread_name_; }
+#endif
   runtime::ThreadState* thread_state() { return thread_state_.get(); }
 
   virtual bool Save(stream::ByteStream* stream) override;
@@ -438,6 +487,17 @@ class XThread : public XObject {
 
   std::unique_ptr<rex::thread::Thread> thread_ = nullptr;
   rex::thread::Fiber* main_fiber_ = nullptr;
+#if REX_PLATFORM_PS5
+  std::atomic<const char*> last_call_{nullptr};
+  std::atomic<uint64_t> call_count_{0};
+  static constexpr uint64_t kCallRing = 24;
+  std::atomic<const char*> call_ring_[kCallRing] = {};
+  std::atomic<bool> waiting_{false};
+  std::atomic<uint32_t> wait_handle_{0};
+  std::atomic<uint32_t> wait_type_{0};
+  std::atomic<uint32_t> wait_object_{0};
+  std::atomic<int64_t> wait_timeout_{INT64_MIN};
+#endif
 };
 
 class XHostThread : public XThread {

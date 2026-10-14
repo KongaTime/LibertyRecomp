@@ -161,7 +161,16 @@ bool Memory::Initialize() {
   // Attempt to create our views. This may fail at the first address
   // we pick, so try a few times.
   mapping_base_ = 0;
-  for (size_t n = 32; n < 64; n++) {
+#if REX_PLATFORM_PS5
+  // PS5: ranges this size are granted from 0x10_0000_0000 up, exactly at the
+  // address asked for, and nothing at or above 1 TiB (PS5_PayloadSDK's
+  // platform/docs/PROBE.md, "Virtual space"); lower, the arena would crowd the
+  // area the kernel places unaddressed reservations in.
+  const size_t first_base_bit = 36;
+#else
+  const size_t first_base_bit = 32;
+#endif
+  for (size_t n = first_base_bit; n < 64; n++) {
     auto mapping_base = reinterpret_cast<uint8_t*>(1ull << n);
     if (!MapViews(mapping_base)) {
       mapping_base_ = mapping_base;
@@ -660,9 +669,34 @@ void Memory::UnregisterPhysicalMemoryInvalidationCallback(void* callback_handle)
   delete entry;
 }
 
+bool Memory::InitializeExternal(uint8_t* virtual_membase, uint8_t* physical_membase,
+                                ExternalWatchFunction watch, void* watch_context) {
+  if (!virtual_membase || !physical_membase || !watch) {
+    return false;
+  }
+  virtual_membase_ = virtual_membase;
+  physical_membase_ = physical_membase;
+  external_watch_ = watch;
+  external_watch_context_ = watch_context;
+  return true;
+}
+
+void Memory::NotifyExternalPhysicalWrite(uint32_t physical_address, uint32_t length) {
+  auto lock = global_critical_region_.Acquire();
+  for (auto invalidation_callback : physical_memory_invalidation_callbacks_) {
+    invalidation_callback->first(invalidation_callback->second, physical_address, length, true);
+  }
+}
+
 void Memory::EnablePhysicalMemoryAccessCallbacks(uint32_t physical_address, uint32_t length,
                                                  bool enable_invalidation_notifications,
                                                  bool enable_data_providers) {
+  if (external_watch_) {
+    if (enable_invalidation_notifications) {
+      external_watch_(external_watch_context_, physical_address, length);
+    }
+    return;
+  }
   heaps_.vA0000000.EnableAccessCallbacks(physical_address, length,
                                          enable_invalidation_notifications, enable_data_providers);
   heaps_.vC0000000.EnableAccessCallbacks(physical_address, length,

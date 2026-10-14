@@ -10,11 +10,19 @@ add_library(rexaudio OBJECT
     xma_register_file.cpp
     # NOP backend (always available)
     nop/nop_audio_system.cpp
-    # SDL backend
-    sdl/sdl_audio_system.cpp
-    sdl/sdl_audio_driver.cpp
 )
 add_library(rex::audio ALIAS rexaudio)
+
+if(PROSPERO)
+    # PS5: sceAudioOut, ported from TheSimpsonsGame-PS5-Builder (ps5/PORTED.md)
+    target_sources(rexaudio PRIVATE
+        prospero/prospero_audio_system.cpp
+        prospero/prospero_audio_driver.cpp)
+else()
+    target_sources(rexaudio PRIVATE
+        sdl/sdl_audio_system.cpp
+        sdl/sdl_audio_driver.cpp)
+endif()
 
 if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     target_sources(rexaudio PRIVATE
@@ -30,7 +38,7 @@ target_include_directories(rexaudio PUBLIC
 )
 
 target_link_libraries(rexaudio
-    PUBLIC rexcore SDL3::SDL3
+    PUBLIC rexcore $<$<NOT:$<BOOL:${PROSPERO}>>:SDL3::SDL3>
     PRIVATE libavcodec libavutil
 )
 

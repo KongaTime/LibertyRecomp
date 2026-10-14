@@ -49,6 +49,10 @@
 #elif defined(__gnu_linux__)
 #define REX_PLATFORM_GNU_LINUX 1
 #define REX_PLATFORM_LINUX 1
+#elif defined(__PROSPERO__)
+// PS5 homebrew (the payload SDK). FreeBSD-like underneath, so it also defines
+// __FreeBSD__ and __unix__, but it is not Linux.
+#define REX_PLATFORM_PS5 1
 #else
 #error Unsupported target OS.
 #endif
@@ -81,6 +85,14 @@
 #endif
 #ifndef REX_PLATFORM_LINUX
 #define REX_PLATFORM_LINUX 0
+#endif
+#ifndef REX_PLATFORM_PS5
+#define REX_PLATFORM_PS5 0
+#endif
+// The name the PS5 files ported from TheSimpsonsGame-PS5-Builder use (the
+// *_prospero.cpp files, ps5/PORTED.md); the same platform as REX_PLATFORM_PS5.
+#ifndef REX_PLATFORM_PROSPERO
+#define REX_PLATFORM_PROSPERO REX_PLATFORM_PS5
 #endif
 
 #if defined(__clang__)

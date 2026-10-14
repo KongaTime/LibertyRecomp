@@ -12,13 +12,27 @@ set(REXUI_CORE_SOURCES
     menu_item.cpp
     presenter.cpp
     renderdoc_api.cpp
-    sdl_virtual_key.cpp
     window.cpp
-    window_sdl.cpp
     windowed_app.cpp
     windowed_app_context.cpp
-    windowed_app_context_sdl.cpp
 )
+
+# Windowing: SDL3, except on the PS5, whose window, app context and entry are
+# ported from TheSimpsonsGame-PS5-Builder (ps5/PORTED.md)
+if(PROSPERO)
+    list(APPEND REXUI_CORE_SOURCES
+        surface_prospero.cpp
+        window_prospero.cpp
+        windowed_app_context_prospero.cpp
+        windowed_app_main_prospero.cpp
+    )
+else()
+    list(APPEND REXUI_CORE_SOURCES
+        sdl_virtual_key.cpp
+        window_sdl.cpp
+        windowed_app_context_sdl.cpp
+    )
+endif()
 
 # Optional overlay dialogs
 set(REXUI_OVERLAY_SOURCES
@@ -93,6 +107,11 @@ set(REXUI_SOURCES
 
 if(REXGLUE_USE_VULKAN)
     list(APPEND REXUI_SOURCES ${REXUI_VULKAN_SOURCES})
+    if(PROSPERO)
+        # PS5: the VideoOut display through RADV's VK_KHR_display, ported from
+        # TheSimpsonsGame-PS5-Builder (ps5/PORTED.md)
+        list(APPEND REXUI_SOURCES vulkan/vulkan_display_prospero.cpp)
+    endif()
 endif()
 
 if(REXGLUE_USE_D3D12)
@@ -116,8 +135,10 @@ target_link_libraries(rexui PUBLIC
     rexcore
     renderdoc
     imgui::imgui
-    SDL3::SDL3
 )
+if(NOT PROSPERO)
+    target_link_libraries(rexui PUBLIC SDL3::SDL3)
+endif()
 target_link_libraries(rexui PRIVATE utf8cpp)
 if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     target_link_libraries(rexui PRIVATE "-framework AppKit" "-framework QuartzCore")
@@ -158,6 +179,11 @@ if(REXGLUE_USE_VULKAN)
         GPUOpen::VulkanMemoryAllocator
         SPIRV-Tools-static
     )
+    if(PROSPERO)
+        # PS5: no library is loaded at run time, so SPIR-V validation uses the
+        # SPIRV-Tools linked in above (spirv_tools_context.cpp)
+        target_compile_definitions(rexui PRIVATE REX_HAS_SPIRV_TOOLS_STATIC=1)
+    endif()
 endif()
 
 # Native Apple presentation is independent of Vulkan execution.

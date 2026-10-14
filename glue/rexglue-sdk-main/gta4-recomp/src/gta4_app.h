@@ -65,8 +65,14 @@ class GTA4App final : public rex::ReXApp {
     const bool uses_default_cache_root = paths.cache_root == default_user_root / "cache";
 
     if (paths.game_data_root.empty()) {
+#if REX_PLATFORM_PS5
+      // The title folder's gamedata/: the PC install's LibertyRecomp/game
+      // folder, copied there by the player (ps5/README.md)
+      paths.game_data_root = kPs5GameDataRoot;
+#else
       const auto installed_game_root = liberty_root / "game";
       paths.game_data_root = installed_game_root;
+#endif
     }
 
     if (uses_default_user_root) {
@@ -80,7 +86,11 @@ class GTA4App final : public rex::ReXApp {
     }
     native_config_path_ = liberty_root / "native.toml";
     paths.config_path = native_config_path_;
+#if REX_PLATFORM_PS5
+    paths.marketplace_content_root = kPs5GameDataRoot / "dlc";
+#else
     paths.marketplace_content_root = liberty_root / "dlc";
+#endif
 
     if (paths.update_data_root.empty() && !paths.game_data_root.empty()) {
       error.clear();
@@ -99,6 +109,10 @@ class GTA4App final : public rex::ReXApp {
   rex::system::xam::ITitleProfileService* title_profile_service_ = nullptr;
   std::shared_ptr<TitleProfileSyncState> title_profile_sync_state_;
   std::thread title_profile_sync_worker_;
+#if REX_PLATFORM_PS5
+  // The game's files, read-only beside eboot.bin (/app0 is the title folder)
+  static inline const std::filesystem::path kPs5GameDataRoot{"/app0/gamedata"};
+#endif
   std::filesystem::path liberty_root_;
   std::filesystem::path native_config_path_;
   std::unique_ptr<gta4::input::UserMusicPlayer> user_music_player_;

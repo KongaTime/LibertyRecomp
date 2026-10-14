@@ -26,7 +26,10 @@
 #include <rex/ui/overlay/debug_overlay.h>
 #include <rex/ui/overlay/settings_overlay.h>
 #include <rex/audio/audio_system.h>
-#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
+#if REX_PLATFORM_PS5
+#include <rex/audio/prospero/prospero_audio_system.h>
+#include <rex/ui/startup_prospero.h>
+#elif REX_PLATFORM_MAC && !REX_PLATFORM_IOS
 #include <rex/audio/coreaudio/coreaudio_audio_system.h>
 #else
 #include <rex/audio/sdl/sdl_audio_system.h>
@@ -49,6 +52,11 @@
 #include <algorithm>
 #include <filesystem>
 #include <string_view>
+#if REX_PLATFORM_PS5
+#include <chrono>
+#include <thread>
+
+#endif
 
 REXCVAR_DEFINE_STRING(gpu_plugin, "", "GPU",
                       "Graphics plugin to load at startup (for example, 'xenos'); empty lets "
@@ -87,11 +95,26 @@ system::AchievementManager& ReXApp::achievements() const {
   return runtime_->kernel_state()->achievements();
 }
 
+namespace {
+// PS5: a marker in the startup log (rex/ui/startup_prospero.h) for each stage,
+// so a boot that stops shows where
+void LogStartupStage(const char* message) {
+#if REX_PLATFORM_PS5
+  prospero_startup_log(message);
+#else
+  (void)message;
+#endif
+}
+}  // namespace
+
 bool ReXApp::OnInitialize() {
+  LogStartupStage("app: environment");
   if (!SetupEnvironment())
     return false;
+  LogStartupStage("app: presentation");
   if (!SetupPresentation())
     return false;
+  LogStartupStage("app: paths");
 
   auto paths = OnFinalizePaths(resolved_defaults_, MakeResumeCallback());
   if (!paths) {
@@ -100,8 +123,10 @@ bool ReXApp::OnInitialize() {
     return true;
   }
 
+  LogStartupStage("app: runtime");
   if (!ConstructRuntime(*paths))
     return false;
+  LogStartupStage("app: launching the module");
   LaunchModule();
   return true;
 }
@@ -114,6 +139,13 @@ bool ReXApp::SetupEnvironment() {
   if (!game_data_cvar.empty()) {
     game_dir = game_data_cvar;
   }
+#if REX_PLATFORM_PS5
+  // The game's files sit in the title's folder, as the Simpsons Game's PS5
+  // port lays them out (/app0/gamedata)
+  else if (std::filesystem::is_directory(exe_dir / "gamedata")) {
+    game_dir = exe_dir / "gamedata";
+  }
+#endif
 
   // User data: cvar override, or platform user directory
   std::filesystem::path user_dir;
@@ -188,7 +220,11 @@ bool ReXApp::SetupEnvironment() {
                                         log_level_str, category_levels);
   if (log_file_cvar.empty()) {
     log_config.app_name = std::string(GetName());
-#if REX_PLATFORM_MAC
+#if REX_PLATFORM_PS5
+    // Beside the startup log, in the title's state folder (writable even when
+    // /app0 is a read-only image)
+    log_config.log_dir = (std::filesystem::path(prospero_state_root()) / "logs").string();
+#elif REX_PLATFORM_MAC
     // A macOS bundle's Contents/MacOS directory is code-signing territory.
     // Runtime logs placed there make a subsequent incremental build fail to
     // seal the bundle.  Keep mutable diagnostics with the rest of the title's
@@ -198,7 +234,6 @@ bool ReXApp::SetupEnvironment() {
     log_config.log_dir = (exe_dir / "logs").string();
 #endif
   }
-
   rex::InitLogging(log_config);
   rex::RegisterLogLevelCallback();
 
@@ -359,7 +394,9 @@ bool ReXApp::ConstructRuntime(const PathConfig& paths) {
 
 bool ReXApp::SetupPresentation() {
   config_.gpu_plugin = REXCVAR_GET(gpu_plugin);
-#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
+#if REX_PLATFORM_PS5
+  config_.audio_factory = REX_AUDIO_BACKEND(rex::audio::prospero::ProsperoAudioSystem);
+#elif REX_PLATFORM_MAC && !REX_PLATFORM_IOS
   config_.audio_factory = REX_AUDIO_BACKEND(rex::audio::coreaudio::CoreAudioAudioSystem);
 #else
   config_.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
@@ -486,6 +523,55 @@ void ReXApp::PublishInputOverlayState() {
   input_capture_->overlay.store(debug_overlay_ || console_overlay_ || settings_overlay_ ||
                                  achievements_overlay_, std::memory_order_release);
 }
+#if REX_PLATFORM_PS5
+// While the game is brought up on the console: every 10 s for its first two
+// minutes, the last hook or kernel export each thread entered and how many it
+// has entered (XThread::NoteCall), so a run that goes quiet says what it waits
+// in, and whether a thread is blocked (its count stands) or busy. Read from
+// memory only: interrupting the threads with a signal to sample their stacks
+// froze the whole console (run 4, 2026-10-12).
+void ReXApp::StartProsperoStallDump() {
+  std::thread([this] {
+    for (int round = 1; round <= 12 && !shutting_down_.load(std::memory_order_acquire); ++round) {
+      std::this_thread::sleep_for(std::chrono::seconds(10));
+      auto* state = system::kernel_state();
+      if (!state) {
+        continue;
+      }
+      auto threads = state->object_table()->GetObjectsByType<system::XThread>();
+      REXLOG_INFO("PS5 stall dump {} ({} s after launch): {} threads", round, round * 10, threads.size());
+      static constexpr const char* kTypes[] = {"Undefined", "Enumerator", "Event", "File", "IOCompletion",
+                                               "Module", "Mutant", "NotifyListener", "Semaphore", "Session",
+                                               "Socket", "SymbolicLink", "Thread", "Timer"};
+      for (auto& xthread : threads) {
+        const char* last = xthread->last_call();
+        const auto* params = xthread->creation_params();
+        std::string line = fmt::format("  {:08X} '{}'{} start {:08X}{}: {} calls, last {}", xthread->handle(),
+                                       xthread->thread_name(), xthread->is_guest_thread() ? " (guest)" : "",
+                                       params->start_address,
+                                       params->xapi_thread_startup
+                                           ? fmt::format(" (via {:08X})", params->xapi_thread_startup)
+                                           : std::string(),
+                                       xthread->call_count(), last ? last : "(none)");
+        if (xthread->waiting()) {
+          const uint32_t type = xthread->wait_type();
+          const int64_t timeout = xthread->wait_timeout();
+          line += fmt::format("; waiting on {:08X} ({} at {:08X}, {})", xthread->wait_handle(),
+                              type < std::size(kTypes) ? kTypes[type] : "?", xthread->wait_object(),
+                              timeout == system::XThread::kNoWaitTimeout
+                                  ? std::string("no timeout")
+                                  : fmt::format("timeout {} x100ns", timeout));
+        }
+        REXLOG_INFO("{}", line);
+        // The calls that led there, once (the second dump) for each thread that made any
+        if (round == 2 && xthread->call_count()) {
+          REXLOG_INFO("    recent: {}", xthread->recent_calls());
+        }
+      }
+    }
+  }).detach();
+}
+#endif
 
 void ReXApp::LaunchModule() {
   app_context().CallInUIThreadDeferred([this]() {
@@ -534,6 +620,9 @@ void ReXApp::LaunchModule() {
       app_context().QuitFromUIThread();
       return;
     }
+#if REX_PLATFORM_PS5
+    StartProsperoStallDump();
+#endif
 
     module_thread_ = std::thread([this, main_thread = std::move(main_thread)]() mutable {
       main_thread->Wait(0, 0, 0, nullptr);

@@ -589,8 +589,13 @@ struct GTA4App::TitleProfileSyncState {
 std::optional<rex::PathConfig> GTA4App::OnFinalizePaths(
     const rex::PathConfig& defaults, std::function<void(rex::PathConfig)> resume) {
   auto paths = defaults;
+#if REX_PLATFORM_PS5
+  paths.game_data_root = kPs5GameDataRoot;
+  paths.marketplace_content_root = kPs5GameDataRoot / "dlc";
+#else
   paths.game_data_root = liberty_root_ / "game";
   paths.marketplace_content_root = liberty_root_ / "dlc";
+#endif
   paths.config_path = native_config_path_;
 
   const bool force_install = REXCVAR_GET(install);
@@ -626,6 +631,14 @@ std::optional<rex::PathConfig> GTA4App::OnFinalizePaths(
   if (!ready) {
     REXLOG_WARN("GTA IV installation is not launch-ready: {}", readiness_error);
   }
+#if REX_PLATFORM_PS5
+  // No installer on the console: the game folder is copied from a PC install
+  REXLOG_ERROR("No usable GTA IV game files in {}: copy the game folder of a PC "
+               "LibertyRecomp install there (ps5/README.md)",
+               paths.game_data_root.string());
+  app_context().QuitFromUIThread();
+  return std::nullopt;
+#else
   const bool dlc_only = ready && force_dlc && !force_install;
   new gta4::install::InstallDialog(
       imgui_drawer(), liberty_root_, dlc_only,
@@ -641,6 +654,7 @@ std::optional<rex::PathConfig> GTA4App::OnFinalizePaths(
       },
       [this]() { app_context().QuitFromUIThread(); });
   return std::nullopt;
+#endif
 }
 
 void GTA4App::OnPreSetup(rex::RuntimeConfig& config) {

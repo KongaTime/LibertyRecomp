@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
@@ -54,6 +55,14 @@
 #endif
 #if REX_PLATFORM_MAC
 #include <rex/ui/surface_mac.h>
+#endif
+#if REX_PLATFORM_PS5
+// The PS5 blocks here are ported from TheSimpsonsGame-PS5-Builder (LoZazaMastro
+// and contributors), tools/rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp at
+// 59e7086, BSD 3-Clause License (see LICENSE); without its frame generation,
+// live settings, tracing and metrics.
+#include <rex/ui/surface_prospero.h>
+#include <rex/ui/vulkan/display_prospero.h>
 #endif
 
 REXCVAR_DEFINE_BOOL(present_render_pass_clear, true, "UI/Presenter",
@@ -348,6 +357,11 @@ Surface::TypeFlags VulkanPresenter::GetSurfaceTypesSupportedByInstance(
     return 0;
   }
   Surface::TypeFlags type_flags = 0;
+#if REX_PLATFORM_PS5
+  if (instance_extensions.ext_KHR_display) {
+    type_flags |= Surface::kTypeFlag_ProsperoDisplay;
+  }
+#endif
 #if REX_PLATFORM_ANDROID
   if (instance_extensions.ext_KHR_android_surface) {
     type_flags |= Surface::kTypeFlag_AndroidNativeWindow;
@@ -771,6 +785,14 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
     }
     VkResult vulkan_surface_create_result = VK_ERROR_UNKNOWN;
     switch (surface_type) {
+#if REX_PLATFORM_PS5
+      case Surface::kTypeIndex_ProsperoDisplay:
+        vulkan_surface_create_result =
+            CreateProsperoDisplaySurface(*vulkan_device_->vulkan_instance(),
+                                         vulkan_device_->physical_device(),
+                                         &paint_context_.vulkan_surface);
+        break;
+#endif
 #if REX_PLATFORM_ANDROID
       case Surface::kTypeIndex_AndroidNativeWindow: {
         auto& android_native_window_surface =
