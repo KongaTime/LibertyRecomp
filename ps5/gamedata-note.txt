@@ -1,0 +1,8 @@
+Put your own GTA IV game files here.
+
+Install Liberty Recompiled on a PC from your own Xbox 360 copy of the game, then
+copy the contents of its game folder (LibertyRecomp/game: default.xex,
+common.rpf, xbox360.rpf, audio.rpf and the rest) into this folder. Episodes from
+Liberty City DLC go in gamedata/dlc (the PC install's LibertyRecomp/dlc).
+
+No game files come with this title.

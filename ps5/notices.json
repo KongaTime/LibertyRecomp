@@ -1,0 +1,13 @@
+[
+ {
+  "id": "game",
+  "name": "Liberty Recompiled (the GTA IV recompilation, KongaTime/LibertyRecomp with the PS5 target), with its ReXGlue SDK fork (glue/rexglue-sdk-main), XenosRecomp's shader runtime, zstd and SMOL-V",
+  "licence": "GPL-3.0-or-later (Liberty Recompiled); BSD-3-Clause (ReXGlue); MIT (XenosRecomp); BSD-3-Clause (zstd); public domain or MIT (SMOL-V)",
+  "copyright": ["Liberty Recompiled contributors", "Tom Clay and the ReXGlue contributors (ReXGlue)",
+                "hedge-dev and contributors (XenosRecomp)", "Meta Platforms, Inc. (zstd)", "Aras Pranckevicius (SMOL-V)"],
+  "repo": "../LibertyRecomp",
+  "texts": [["COPYING", "COPYING"], ["glue/rexglue-sdk-main/LICENSE", "rexglue-LICENSE"]],
+  "submodule_texts": [["tools/XenosRecomp/LICENSE.md", "XenosRecomp-LICENSE.md"],
+                      ["tools/XenosRecomp/thirdparty/zstd/LICENSE", "zstd-LICENSE"]]
+ }
+]

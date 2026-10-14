@@ -331,8 +331,14 @@ if(REXGLUE_USE_VULKAN)
         "${GTA4_NATIVE_SHADER_CACHE_ROOT}"
         "${GTA4_NATIVE_SMOLV_ROOT}"
     )
+    if(PROSPERO)
+        # Staged beside eboot.bin by ps5/build.sh
+        set(GTA4_NATIVE_FONT_ASSET_ROOT "/app0/font_atlases")
+    else()
+        set(GTA4_NATIVE_FONT_ASSET_ROOT "${LIBERTY_RECOMP_WORKSPACE_ROOT}/LibertyRecompLib/font_atlases")
+    endif()
     target_compile_definitions(rexgpu-gta4-native PRIVATE
-        GTA4_NATIVE_FONT_ASSET_ROOT="${LIBERTY_RECOMP_WORKSPACE_ROOT}/LibertyRecompLib/font_atlases"
+        GTA4_NATIVE_FONT_ASSET_ROOT="${GTA4_NATIVE_FONT_ASSET_ROOT}"
     )
     target_link_libraries(rexgpu-gta4-native PRIVATE
         libzstd_static
