@@ -279,6 +279,10 @@ if(REXGLUE_USE_VULKAN)
         add_subdirectory("${GTA4_NATIVE_ZSTD_ROOT}/build/cmake"
             "${CMAKE_CURRENT_BINARY_DIR}/gta4_native_zstd")
     endif()
+    if(PROSPERO)
+        # zstd's trace hooks are weak references, which a PS5 title may not import
+        target_compile_definitions(libzstd_static PRIVATE ZSTD_TRACE=0)
+    endif()
 
     if(PROSPERO)
         set(REXGPU_GTA4_NATIVE_LIBRARY_TYPE STATIC)

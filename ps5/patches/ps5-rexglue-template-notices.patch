@@ -1,0 +1,15 @@
+diff --git a/tools/stage-notices.py b/tools/stage-notices.py
+index e34dbd1..7d2003f 100755
+--- a/tools/stage-notices.py
++++ b/tools/stage-notices.py
+@@ -65,7 +65,9 @@ def pinned(script, name):
+ def write_text(dest, repo, rev, path):
+     """A file of a repository at a revision, into the licenses folder."""
+     dest.parent.mkdir(parents=True, exist_ok=True)
+-    data = subprocess.run(["git", "-C", str(repo), "show", f"{rev}:{path}"], capture_output=True, check=True).stdout
++    # ./: the path from repo, which may be a folder inside its repository (a game's
++    # own ReXGlue SDK, say), not that repository's root
++    data = subprocess.run(["git", "-C", str(repo), "show", f"{rev}:./{path}"], capture_output=True, check=True).stdout
+     dest.write_bytes(data)
+ 
+ 

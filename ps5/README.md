@@ -24,6 +24,10 @@ repository's own SDK, `glue/rexglue-sdk-main`, with the PS5 target of
     repository: `../ps5/PS5_ReXGlueTemplate`, or point `PS5_REXGLUE_TEMPLATE` at
     it.
   - This build does not need the template's `tools/build-rexglue.sh`.
+  - Apply `ps5/patches/ps5-rexglue-template-notices.patch` to the template once
+    (`git -C <template> apply ...`). Its notices step otherwise expects the
+    ReXGlue SDK to be a repository of its own, and this one is a folder in this
+    repository. `ps5/build.sh` checks for it.
 - **To play:**
   - a PS5 that runs homebrew (etaHEN), with ShadowMountPlus and an FTP server;
   - your own Xbox 360 copy of GTA IV, installed with Liberty Recompiled on a PC.
