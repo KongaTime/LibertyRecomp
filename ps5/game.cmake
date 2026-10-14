@@ -35,7 +35,12 @@ set(TITLE_RESULTS_FILE /app0/liberty-results.txt)
 
 # What the SDK compiles everything with (its CMakeLists.txt add_compile_options
 # and rexui's public definitions), besides the template's REX_OPTIONS
-set(gta4_options -ffp-model=strict -fno-char8_t -mcmodel=large -msse4.1 -Wno-everything)
+# One section per file, not per function: in the large code model every function
+# is a .ltext.<name> section, which the linker keeps apart, and the recompiled
+# code's 57,000 of them took the title past ELF's 65,280 sections, more than
+# the console's ELF tools read
+set(gta4_options -ffp-model=strict -fno-char8_t -mcmodel=large -msse4.1 -Wno-everything
+	-fno-function-sections -fno-data-sections)
 set(gta4_definitions REX_HAS_FIDELITYFX_FSR1=1)
 set(gta4_includes ${gta4}/src ${gta4}/generated ${REXGLUE_SRC}/src ${REXGLUE_SRC}/thirdparty/crypto
 	${REXGLUE_SRC}/thirdparty/inja/third_party/include ${REXGLUE_SRC}/thirdparty/vulkan-headers/include
@@ -80,6 +85,10 @@ target_compile_definitions(gta4_app PRIVATE ${gta4_definitions} GTA4_TOUCH_PRIMA
 	GTA4_RPF_AES_KEY_SOURCE="/app0/aes_key.bin")
 set_source_files_properties(${gta4}/src/gta4_sony_feedback.cpp ${gta4}/src/gta4_sony_event_hooks.cpp
 	PROPERTIES COMPILE_DEFINITIONS GTA4_SONY_PRIMARY_PLAYER_ALIAS)
+# The RPF installer's inflate: the zlib PS5_Vulkan builds for the console, whose
+# code RADV's archive carries into the title
+set_source_files_properties(${gta4}/src/install/gta4_rpf_extractor.cpp PROPERTIES
+	INCLUDE_DIRECTORIES ${PS5_VULKAN_DIR}/.deps/native/zlib/root/usr/include)
 # The C file builds as C, without the C++ options
 set_source_files_properties(${REXGLUE_SRC}/thirdparty/crypto/rijndael-alg-fst.c PROPERTIES
 	COMPILE_OPTIONS "-std=c11;-w")

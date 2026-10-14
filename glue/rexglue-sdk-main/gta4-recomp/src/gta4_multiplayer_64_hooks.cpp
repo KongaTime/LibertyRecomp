@@ -11,6 +11,7 @@
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <string_view>
 #include <unordered_map>
@@ -173,7 +174,13 @@ struct NearestNetworkDecisionContext {
   PPCContext call_ctx{};
 };
 
-thread_local NearestNetworkDecisionContext g_nearest_network_decision;
+// Per thread, on the heap: PPCContext is 64-byte aligned, more than some targets
+// (the PS5: 32) allow a thread_local
+NearestNetworkDecisionContext& NearestNetworkDecision() {
+  thread_local const std::unique_ptr<NearestNetworkDecisionContext> decision =
+      std::make_unique<NearestNetworkDecisionContext>();
+  return *decision;
+}
 
 struct PlayerInfoBatchProjectionContext {
   bool active = false;
@@ -3913,15 +3920,15 @@ void RestoreLegacyProximityStatusTable(uint8_t* base) {
 }
 
 extern "C" void sub_826E0A90(PPCContext& ctx, uint8_t* base) {
-  if (!g_nearest_network_decision.active) {
+  if (!NearestNetworkDecision().active) {
     __imp__sub_826E0A90(ctx, base);
     return;
   }
   const double score = ctx.f29.f64;
-  if (!g_nearest_network_decision.captured || score < g_nearest_network_decision.score) {
-    g_nearest_network_decision.captured = true;
-    g_nearest_network_decision.score = score;
-    g_nearest_network_decision.call_ctx = ctx;
+  if (!NearestNetworkDecision().captured || score < NearestNetworkDecision().score) {
+    NearestNetworkDecision().captured = true;
+    NearestNetworkDecision().score = score;
+    NearestNetworkDecision().call_ctx = ctx;
   }
 }
 
@@ -3930,8 +3937,8 @@ extern "C" void sub_826E6E48(PPCContext& ctx, uint8_t* base) {
   const auto timestamp_address =
       mp64::CheckedGuestAddress(input_ctx.r3.u32, mp64::kNearestNetworkTimestampOffset);
   const uint32_t initial_timestamp = timestamp_address ? REX_LOAD_U32(*timestamp_address) : 0;
-  const NearestNetworkDecisionContext saved_decision = g_nearest_network_decision;
-  g_nearest_network_decision = {.active = true};
+  const NearestNetworkDecisionContext saved_decision = NearestNetworkDecision();
+  NearestNetworkDecision() = {.active = true};
   __imp__sub_826E6E48(ctx, base);
   const PPCContext result_ctx = ctx;
   const uint32_t final_timestamp = timestamp_address ? REX_LOAD_U32(*timestamp_address) : 0;
@@ -3947,8 +3954,8 @@ extern "C" void sub_826E6E48(PPCContext& ctx, uint8_t* base) {
   if (timestamp_address) {
     REX_STORE_U32(*timestamp_address, final_timestamp);
   }
-  const NearestNetworkDecisionContext decision = g_nearest_network_decision;
-  g_nearest_network_decision = saved_decision;
+  const NearestNetworkDecisionContext decision = NearestNetworkDecision();
+  NearestNetworkDecision() = saved_decision;
   if (decision.captured) {
     PPCContext action_ctx = decision.call_ctx;
     __imp__sub_826E0A90(action_ctx, base);
