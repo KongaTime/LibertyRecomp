@@ -1,8 +1,17 @@
-Put your own GTA IV game files here.
+Liberty Recompiled needs your own copy of GTA IV (Xbox 360, USA, version 1.00)
+and its v8 title update. None of the game comes with this title.
 
-Install Liberty Recompiled on a PC from your own Xbox 360 copy of the game, then
-copy the contents of its game folder (LibertyRecomp/game: default.xex,
-common.rpf, xbox360.rpf, audio.rpf and the rest) into this folder. Episodes from
-Liberty City DLC go in gamedata/dlc (the PC install's LibertyRecomp/dlc).
+  gamedata/       the files extract-xiso extracted from your disc (default.xex,
+                  common.rpf, xbox360.rpf, audio.rpf and the rest), or the disc
+                  image (.iso) itself
+  title-update/   the v8 title update: the TU file from your Xbox 360's hard drive
+                  (Content/0000000000000000/545407F2/000B0000/), or its default.xexp.
+                  Leave only that one file here (and this README).
+  episodes/       optional: TLAD/ and TBOGT/, the episodes' files
 
-No game files come with this title.
+On its first launch the title unpacks the game into game/ (several minutes, and
+about twice the game's size in free space). After that it starts the game
+directly, and gamedata/ and title-update/ can be emptied.
+
+A game folder already installed by Liberty Recompiled on a PC (its
+LibertyRecomp/game folder) can go in gamedata/ instead: it is used as it is.

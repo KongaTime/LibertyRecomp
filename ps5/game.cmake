@@ -67,7 +67,7 @@ set(gta4_app_sources
 	gta4_lzx_hooks.cpp gta4_multiplayer_64_hooks.cpp gta4_online_hooks.cpp gta4_native_hooks.cpp
 	gta4_population_hooks.cpp gta4_streaming_diagnostics.cpp gta4_streaming_hooks.cpp
 	gta4_touch_coordinator.cpp gta4_transition_hooks.cpp install/gta4_installer.cpp
-	install/gta4_rpf_extractor.cpp install/gta4_source_inspector.cpp legal_screen_trace.cpp
+	install/gta4_rpf_extractor.cpp install/gta4_source_inspector.cpp install/gta4_console_install.cpp legal_screen_trace.cpp
 	rpf_button_prompts.cpp input/text_chat_dialog.cpp input/context_touch_controls.cpp
 	input/context_touch_context.cpp input/context_touch_camera_hooks.cpp
 	input/context_touch_settings.cpp input/context_touch_draw.cpp input/context_touch_layout.cpp

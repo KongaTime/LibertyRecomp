@@ -32,6 +32,9 @@
 #include "gta4_keyboard_controller.h"
 #include "gta4_touch_coordinator.h"
 #include "install/gta4_install_dialog.h"
+#if REX_PLATFORM_PS5
+#include "install/gta4_console_install.h"
+#endif
 #include "install/gta4_installer.h"
 #include "input/user_music_player.h"
 #include "input/text_chat_dialog.h"
@@ -586,12 +589,24 @@ struct GTA4App::TitleProfileSyncState {
   bool stopping = false;
 };
 
+#if REX_PLATFORM_PS5
+std::filesystem::path GTA4App::Ps5GameRoot() {
+  if (gta4::install::IsInstallReady(kPs5InstalledGameRoot)) {
+    return kPs5InstalledGameRoot;
+  }
+  if (gta4::install::IsInstallReady(kPs5GameDataRoot)) {
+    return kPs5GameDataRoot;
+  }
+  return kPs5InstalledGameRoot;
+}
+#endif
+
 std::optional<rex::PathConfig> GTA4App::OnFinalizePaths(
     const rex::PathConfig& defaults, std::function<void(rex::PathConfig)> resume) {
   auto paths = defaults;
 #if REX_PLATFORM_PS5
-  paths.game_data_root = kPs5GameDataRoot;
-  paths.marketplace_content_root = kPs5GameDataRoot / "dlc";
+  paths.game_data_root = Ps5GameRoot();
+  paths.marketplace_content_root = Ps5MarketplaceRoot(paths.game_data_root);
 #else
   paths.game_data_root = liberty_root_ / "game";
   paths.marketplace_content_root = liberty_root_ / "dlc";
@@ -632,11 +647,30 @@ std::optional<rex::PathConfig> GTA4App::OnFinalizePaths(
     REXLOG_WARN("GTA IV installation is not launch-ready: {}", readiness_error);
   }
 #if REX_PLATFORM_PS5
-  // No installer on the console: the game folder is copied from a PC install
-  REXLOG_ERROR("No usable GTA IV game files in {}: copy the game folder of a PC "
-               "LibertyRecomp install there (ps5/README.md)",
-               paths.game_data_root.string());
-  app_context().QuitFromUIThread();
+  // Install from the files the player copied into the title folder
+  // (ps5/README.md), as the PC app's installer does
+  std::string source_error;
+  auto sources = gta4::install::FindConsoleSources(kPs5TitleRoot, source_error);
+  if (!sources) {
+    REXLOG_ERROR("GTA IV cannot start: {}", source_error);
+    rex::ui::ImGuiDialog::ShowMessageBox(imgui_drawer(), "Liberty Recompiled",
+                                         source_error + ". Then launch the title again.");
+    return std::nullopt;
+  }
+  new gta4::install::ConsoleInstallDialog(
+      imgui_drawer(), std::move(*sources), kPs5TitleRoot,
+      [paths = std::move(paths), resume = std::move(resume)]() mutable {
+        paths.game_data_root = kPs5InstalledGameRoot;
+        paths.marketplace_content_root = Ps5MarketplaceRoot(kPs5InstalledGameRoot);
+        std::error_code error;
+        const auto update_root = paths.game_data_root / "update";
+        if (std::filesystem::is_directory(update_root, error)) {
+          paths.update_data_root = update_root;
+        } else {
+          paths.update_data_root.clear();
+        }
+        resume(std::move(paths));
+      });
   return std::nullopt;
 #else
   const bool dlc_only = ready && force_dlc && !force_install;

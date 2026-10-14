@@ -66,9 +66,7 @@ class GTA4App final : public rex::ReXApp {
 
     if (paths.game_data_root.empty()) {
 #if REX_PLATFORM_PS5
-      // The title folder's gamedata/: the PC install's LibertyRecomp/game
-      // folder, copied there by the player (ps5/README.md)
-      paths.game_data_root = kPs5GameDataRoot;
+      paths.game_data_root = Ps5GameRoot();
 #else
       const auto installed_game_root = liberty_root / "game";
       paths.game_data_root = installed_game_root;
@@ -87,7 +85,7 @@ class GTA4App final : public rex::ReXApp {
     native_config_path_ = liberty_root / "native.toml";
     paths.config_path = native_config_path_;
 #if REX_PLATFORM_PS5
-    paths.marketplace_content_root = kPs5GameDataRoot / "dlc";
+    paths.marketplace_content_root = Ps5MarketplaceRoot(paths.game_data_root);
 #else
     paths.marketplace_content_root = liberty_root / "dlc";
 #endif
@@ -110,8 +108,18 @@ class GTA4App final : public rex::ReXApp {
   std::shared_ptr<TitleProfileSyncState> title_profile_sync_state_;
   std::thread title_profile_sync_worker_;
 #if REX_PLATFORM_PS5
-  // The game's files, read-only beside eboot.bin (/app0 is the title folder)
+  // The title folder (/app0). Its game/ is the game the title installed on its
+  // first launch (install/gta4_console_install.h: from gamedata/, an extracted
+  // disc, and title-update/); or gamedata/ is a game folder already installed by
+  // the PC app, used as it is.
+  static inline const std::filesystem::path kPs5TitleRoot{"/app0"};
+  static inline const std::filesystem::path kPs5InstalledGameRoot{"/app0/game"};
   static inline const std::filesystem::path kPs5GameDataRoot{"/app0/gamedata"};
+  // The game folder that is ready, the installed one when neither is
+  static std::filesystem::path Ps5GameRoot();
+  static std::filesystem::path Ps5MarketplaceRoot(const std::filesystem::path& game_root) {
+    return game_root == kPs5GameDataRoot ? kPs5GameDataRoot / "dlc" : kPs5TitleRoot / "dlc";
+  }
 #endif
   std::filesystem::path liberty_root_;
   std::filesystem::path native_config_path_;
