@@ -1,6 +1,7 @@
 #include <rex/platform.h>
 #include <rex/thread.h>
 #if REX_PLATFORM_PS5
+#include <rex/platform/sampler_prospero.h>
 #include <rex/ui/ps5_frame_counters.h>
 #include <rex/ui/startup_prospero.h>
 #endif
@@ -5518,6 +5519,9 @@ void Gta4NativeGraphicsSystem::RenderWorkerMain() {
 #if REX_PLATFORM_PS5
   // A CPU of its own, off the game's (rex/thread.h, Ps5CpuRole)
   rex::thread::Ps5PlaceCurrentThread(rex::thread::Ps5CpuRole::kRenderer);
+  // Where its time goes, in the results file (rex/platform/sampler_prospero.h)
+  rex::ps5::StartSamplingCurrentThread("renderer",
+                                       reinterpret_cast<uintptr_t>(__builtin_frame_address(0)));
 #endif
   std::vector<std::pair<RenderPhase, uint32_t>> render_phase_stack;
   uint64_t startup_texture_lock_count = 0;

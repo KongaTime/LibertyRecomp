@@ -102,7 +102,7 @@ elseif(UNIX)
         # direct memory (memory_ps5.cpp; POSIX shared memory would be charged to
         # the title's small flexible budget)
         target_sources(rexcore PRIVATE fiber_ps5.cpp memory_ps5.cpp startup_ps5.cpp
-            fault_prospero.cpp abort_prospero.cpp)
+            fault_prospero.cpp abort_prospero.cpp sampler_prospero.cpp)
     else()
         target_sources(rexcore PRIVATE memory_posix.cpp)
     endif()
