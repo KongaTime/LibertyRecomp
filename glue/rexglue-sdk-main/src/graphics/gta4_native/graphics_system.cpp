@@ -1,5 +1,6 @@
 #include <rex/platform.h>
 #if REX_PLATFORM_PS5
+#include <rex/ui/ps5_frame_counters.h>
 #include <rex/ui/startup_prospero.h>
 #endif
 #include <rex/graphics/gta4_native/fusion_tone_lut.h>
@@ -33284,6 +33285,9 @@ bool Gta4NativeGraphicsSystem::ClearGuestOutput(
           submit_result =
               profile::CpuCall(profile::CpuOp::kDriverSubmit, [&] { return dfn.vkQueueSubmit(queue.queue(), 1, &submit_info, fence_acquisition.fence()); });
           if (submit_result == VK_SUCCESS) {
+#if REX_PLATFORM_PS5
+            rex::ps5::renderer_frames.fetch_add(1, std::memory_order_relaxed);
+#endif
             vulkan_context.MarkImageAccessSubmitted();
             SubmitTemporalFrame();
             if (temporal_generated_frame_.has_generated_frame)

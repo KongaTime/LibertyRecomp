@@ -15,6 +15,10 @@
 #include <cctype>
 #include <utility>
 
+#include <rex/platform.h>
+#if REX_PLATFORM_PS5
+#include <rex/ui/ps5_frame_counters.h>
+#endif
 #include <rex/assert.h>
 #include <rex/cvar.h>
 #include <rex/diagnostics/policy.h>
@@ -1818,6 +1822,9 @@ Presenter::PaintResult Presenter::PaintAndPresent(bool execute_ui_drawers) {
   const uint64_t paint_begin_ns = FramePacerNowNs();
   PaintResult result = PaintAndPresentImpl(execute_ui_drawers);
   if (result == PaintResult::kPresented || result == PaintResult::kPresentedSuboptimal) {
+#if REX_PLATFORM_PS5
+    rex::ps5::screen_frames.fetch_add(1, std::memory_order_relaxed);
+#endif
     const uint64_t queue_end_ns = FramePacerNowNs();
     frame_pacer_.Queued(queue_end_ns);
     ++host_rate_trace_count_;

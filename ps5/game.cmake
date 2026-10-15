@@ -33,6 +33,12 @@ endif()
 
 set(TITLE_RESULTS_FILE /app0/liberty-results.txt)
 
+# Which build a results file came from: its first lines name the commit
+execute_process(COMMAND git -C ${LIBERTY_ROOT} describe --always --dirty --abbrev=8
+	OUTPUT_VARIABLE liberty_ps5_build OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+string(TIMESTAMP liberty_ps5_build_time "%Y-%m-%d %H:%M" UTC)
+set(liberty_ps5_build "${liberty_ps5_build} ${liberty_ps5_build_time}")
+
 # What the SDK compiles everything with (its CMakeLists.txt add_compile_options
 # and rexui's public definitions), besides the template's REX_OPTIONS
 # One section per file, not per function: in the large code model every function
@@ -82,7 +88,7 @@ target_compile_options(gta4_app PRIVATE ${gta4_options})
 target_compile_definitions(gta4_app PRIVATE ${gta4_definitions} GTA4_TOUCH_PRIMARY_PLAYER_ALIAS=1
 	GTA4_RECOMP_ASSET_XEX="/app0/gamedata/default.xex"
 	GTA4_BUTTON_PROMPT_ASSET_ROOT="/app0/button_prompts"
-	GTA4_RPF_AES_KEY_SOURCE="/app0/aes_key.bin")
+	GTA4_RPF_AES_KEY_SOURCE="/app0/aes_key.bin" LIBERTY_PS5_BUILD="${liberty_ps5_build}")
 set_source_files_properties(${gta4}/src/gta4_sony_feedback.cpp ${gta4}/src/gta4_sony_event_hooks.cpp
 	PROPERTIES COMPILE_DEFINITIONS GTA4_SONY_PRIMARY_PLAYER_ALIAS)
 # The RPF installer's inflate: the zlib PS5_Vulkan builds for the console, whose

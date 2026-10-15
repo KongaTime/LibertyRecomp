@@ -28,7 +28,12 @@
 #include <rex/audio/audio_system.h>
 #if REX_PLATFORM_PS5
 #include <rex/audio/prospero/prospero_audio_system.h>
+#include <rex/ui/ps5_frame_counters.h>
 #include <rex/ui/startup_prospero.h>
+#include <chrono>
+#include <cstdio>
+#include <mutex>
+#include <thread>
 #elif REX_PLATFORM_MAC && !REX_PLATFORM_IOS
 #include <rex/audio/coreaudio/coreaudio_audio_system.h>
 #else
@@ -580,7 +585,47 @@ void ReXApp::StartProsperoStallDump() {
 }
 #endif
 
+#if REX_PLATFORM_PS5
+namespace {
+// Every five seconds, the frames the game finished, the renderer submitted and
+// the screen showed, in the results file the player sends: where a slow run's
+// frames stop (rex/ui/ps5_frame_counters.h)
+void StartProsperoFrameReporter() {
+  static std::once_flag started;
+  std::call_once(started, [] {
+    std::thread([] {
+      using Clock = std::chrono::steady_clock;
+      uint64_t game = rex::ps5::game_frames.load(), renderer = rex::ps5::renderer_frames.load(),
+               screen = rex::ps5::screen_frames.load();
+      auto last = Clock::now();
+      for (;;) {
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        const auto now = Clock::now();
+        const double seconds = std::chrono::duration<double>(now - last).count();
+        const uint64_t game_now = rex::ps5::game_frames.load();
+        const uint64_t renderer_now = rex::ps5::renderer_frames.load();
+        const uint64_t screen_now = rex::ps5::screen_frames.load();
+        char line[128];
+        std::snprintf(line, sizeof(line),
+                      "perf: game %.1f fps, renderer %.1f fps, screen %.1f fps",
+                      (game_now - game) / seconds, (renderer_now - renderer) / seconds,
+                      (screen_now - screen) / seconds);
+        prospero_startup_log(line);
+        game = game_now;
+        renderer = renderer_now;
+        screen = screen_now;
+        last = now;
+      }
+    }).detach();
+  });
+}
+}  // namespace
+#endif
+
 void ReXApp::LaunchModule() {
+#if REX_PLATFORM_PS5
+  StartProsperoFrameReporter();
+#endif
   app_context().CallInUIThreadDeferred([this]() {
     // Register the achievement notification callback now that the runtime and
     // KernelState are guaranteed to exist. Done here (not OnCreateDialogs)

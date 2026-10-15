@@ -35,6 +35,8 @@
 #include "gta4_touch_coordinator.h"
 #include "install/gta4_install_dialog.h"
 #if REX_PLATFORM_PS5
+#include <rex/ui/startup_prospero.h>
+
 #include "install/gta4_console_install.h"
 #endif
 #include "install/gta4_installer.h"
@@ -730,6 +732,9 @@ void ApplyPs5DefaultSettings() {
 
 void GTA4App::OnPreSetup(rex::RuntimeConfig& config) {
 #if REX_PLATFORM_PS5
+#ifdef LIBERTY_PS5_BUILD
+  prospero_startup_log("build: " LIBERTY_PS5_BUILD);
+#endif
   ApplyPs5DefaultSettings();
 #endif
   rex::input::mnk::SetNativeControllerCompatibilityBindings(
