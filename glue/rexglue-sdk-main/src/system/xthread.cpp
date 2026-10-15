@@ -37,6 +37,9 @@
 #include <rex/system/xthread.h>
 #include <rex/thread.h>
 #include <rex/vec128.h>
+#if REX_PLATFORM_PS5
+#include <rex/ui/ps5_frame_counters.h>
+#endif
 
 REXCVAR_DEFINE_BOOL(ignore_thread_priorities, true, "Kernel",
                     "Ignores game-specified thread priorities");
@@ -913,6 +916,11 @@ void XThread::SetActiveCpu(uint8_t cpu_index) {
   if (ps5_mask && ps5_mask != ps5_cpu_mask_ && thread_) {
     ps5_cpu_mask_ = ps5_mask;
     thread_->set_affinity_mask(ps5_mask);
+    if (main_thread_ && is_guest_thread()) {
+      // Whose waits the results file reports (rex/ui/ps5_frame_counters.h)
+      rex::ps5::main_guest_thread.store(reinterpret_cast<uintptr_t>(thread_->native_handle()),
+                                        std::memory_order_relaxed);
+    }
   }
   return;
 #endif  // REX_PLATFORM_PS5
@@ -1051,6 +1059,9 @@ uint32_t XThread::SelfSuspend() {
 #endif
 
 X_STATUS XThread::Delay(uint32_t processor_mode, uint32_t alertable, uint64_t interval) {
+#if REX_PLATFORM_PS5
+  const rex::ps5::MainWaitScope wait_scope;
+#endif
   int64_t timeout_ticks = interval;
   uint32_t timeout_ms;
   if (timeout_ticks > 0) {

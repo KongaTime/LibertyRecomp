@@ -26,6 +26,9 @@
 #include <rex/system/xsemaphore.h>
 #include <rex/system/xsymboliclink.h>
 #include <rex/system/xthread.h>
+#if REX_PLATFORM_PS5
+#include <rex/ui/ps5_frame_counters.h>
+#endif
 
 namespace rex::system {
 
@@ -202,6 +205,9 @@ uint32_t XObject::TimeoutTicksToMs(int64_t timeout_ticks) {
 
 X_STATUS XObject::Wait(uint32_t wait_reason, uint32_t processor_mode, uint32_t alertable,
                        uint64_t* opt_timeout) {
+#if REX_PLATFORM_PS5
+  const rex::ps5::MainWaitScope wait_scope;
+#endif
   auto wait_handle = GetWaitHandle();
   if (!wait_handle) {
     // Object doesn't support waiting.
@@ -235,6 +241,9 @@ X_STATUS XObject::Wait(uint32_t wait_reason, uint32_t processor_mode, uint32_t a
 X_STATUS XObject::SignalAndWait(XObject* signal_object, XObject* wait_object, uint32_t wait_reason,
                                 uint32_t processor_mode, uint32_t alertable,
                                 uint64_t* opt_timeout) {
+#if REX_PLATFORM_PS5
+  const rex::ps5::MainWaitScope wait_scope;
+#endif
   auto timeout_ms = opt_timeout ? std::chrono::milliseconds(chrono::Clock::ScaleGuestDurationMillis(
                                       TimeoutTicksToMs(*opt_timeout)))
                                 : std::chrono::milliseconds::max();
@@ -262,6 +271,9 @@ X_STATUS XObject::SignalAndWait(XObject* signal_object, XObject* wait_object, ui
 X_STATUS XObject::WaitMultiple(uint32_t count, XObject** objects, uint32_t wait_type,
                                uint32_t wait_reason, uint32_t processor_mode, uint32_t alertable,
                                uint64_t* opt_timeout) {
+#if REX_PLATFORM_PS5
+  const rex::ps5::MainWaitScope wait_scope;
+#endif
   std::vector<rex::thread::WaitHandle*> wait_handles(count);
   for (size_t i = 0; i < count; ++i) {
     wait_handles[i] = objects[i]->GetWaitHandle();

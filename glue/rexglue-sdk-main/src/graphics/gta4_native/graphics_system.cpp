@@ -3500,10 +3500,15 @@ bool Gta4NativeGraphicsSystem::SubmitTitleCommand(uint32_t title_id, uint32_t ab
     std::unique_lock lock(render_mutex_);
     const uint64_t queue_lock_end = profile_transport ? profile::CpuTick() : 0;
     producer_waiting_ = render_queue_.size() >= kMaximumQueuedCommands || queued_title_presents_ >= 2;
-    render_condition_.wait(lock, [this]() {
-      return !render_worker_running_ ||
-             (render_queue_.size() < kMaximumQueuedCommands && queued_title_presents_ < 2);
-    });
+    {
+#if REX_PLATFORM_PS5
+      const rex::ps5::TickScope queue_wait(rex::ps5::queue_wait_ticks, producer_waiting_);
+#endif
+      render_condition_.wait(lock, [this]() {
+        return !render_worker_running_ ||
+               (render_queue_.size() < kMaximumQueuedCommands && queued_title_presents_ < 2);
+      });
+    }
     const uint64_t backpressure_end = profile_transport ? profile::CpuTick() : 0;
     producer_waiting_ = false;
     if (!render_worker_running_) {
@@ -3688,10 +3693,15 @@ bool Gta4NativeGraphicsSystem::ExecuteTitleCommand(uint32_t title_id, uint32_t a
   {
     std::unique_lock lock(render_mutex_);
     producer_waiting_ = render_queue_.size() >= kMaximumQueuedCommands || queued_title_presents_ >= 2;
-    render_condition_.wait(lock, [this]() {
-      return !render_worker_running_ ||
-             (render_queue_.size() < kMaximumQueuedCommands && queued_title_presents_ < 2);
-    });
+    {
+#if REX_PLATFORM_PS5
+      const rex::ps5::TickScope queue_wait(rex::ps5::queue_wait_ticks, producer_waiting_);
+#endif
+      render_condition_.wait(lock, [this]() {
+        return !render_worker_running_ ||
+               (render_queue_.size() < kMaximumQueuedCommands && queued_title_presents_ < 2);
+      });
+    }
     producer_waiting_ = false;
     if (!render_worker_running_) {
       return false;
@@ -3707,6 +3717,10 @@ bool Gta4NativeGraphicsSystem::ExecuteTitleCommand(uint32_t title_id, uint32_t a
   render_condition_.notify_one();
 
   std::unique_lock completion_lock(synchronous->mutex);
+#if REX_PLATFORM_PS5
+  rex::ps5::lock_waits.fetch_add(1, std::memory_order_relaxed);
+  const rex::ps5::TickScope lock_wait(rex::ps5::lock_wait_ticks);
+#endif
   synchronous->condition.wait(completion_lock, [&synchronous]() { return synchronous->complete; });
   std::memcpy(result, &synchronous->result, sizeof(synchronous->result));
   return synchronous->succeeded;
@@ -5587,6 +5601,9 @@ void Gta4NativeGraphicsSystem::RenderWorkerMain() {
       worker_command_batch_.clear();
       worker_command_cursor_ = 0;
       std::unique_lock lock(render_mutex_);
+#if REX_PLATFORM_PS5
+      const rex::ps5::TickScope idle(rex::ps5::render_idle_ticks, render_queue_.empty());
+#endif
       render_condition_.wait(
           lock, [this]() { return !render_worker_running_ || !render_queue_.empty(); });
       if (render_queue_.empty()) {

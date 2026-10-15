@@ -14,8 +14,12 @@
 #include <rex/assert.h>
 #include <rex/diagnostics/gpu_flight_recorder.h>
 #include <rex/logging.h>
+#include <rex/platform.h>
 #include <rex/ui/vulkan/submission_tracker.h>
 #include <rex/ui/vulkan/util.h>
+#if REX_PLATFORM_PS5
+#include <rex/ui/ps5_frame_counters.h>
+#endif
 
 namespace rex {
 namespace ui {
@@ -169,6 +173,9 @@ bool VulkanSubmissionTracker::AwaitSubmissionCompletion(uint64_t submission_inde
         // Wait if requested.
         gpu_flight::Record("fence.wait-begin", uint64_t(uintptr_t(pending_pair.second)),
                            pending_pair.first, 0, uint64_t(uintptr_t(this)), submission_index);
+#if REX_PLATFORM_PS5
+        const rex::ps5::TickScope gpu_wait(rex::ps5::gpu_wait_ticks);
+#endif
         const VkResult wait_result =
             dfn.vkWaitForFences(device, 1, &pending_pair.second, VK_TRUE, UINT64_MAX);
         gpu_flight::Record("fence.wait-end", uint64_t(uintptr_t(pending_pair.second)),

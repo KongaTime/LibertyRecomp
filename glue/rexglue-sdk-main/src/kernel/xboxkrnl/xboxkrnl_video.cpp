@@ -34,7 +34,6 @@
 #include <rex/ui/flags.h>
 #include <rex/platform.h>
 #if REX_PLATFORM_PS5
-#include <rex/ui/ps5_frame_counters.h>
 #endif
 
 namespace {
@@ -449,9 +448,6 @@ void VdSwap_entry(mapped_void buffer_ptr,      // ptr into primary ringbuffer
                   mapped_u32 frontbuffer_ptr,  // ptr to frontbuffer address
                   mapped_u32 texture_format_ptr, mapped_u32 color_space_ptr, mapped_u32 width,
                   mapped_u32 height) {
-#if REX_PLATFORM_PS5
-  rex::ps5::game_frames.fetch_add(1, std::memory_order_relaxed);
-#endif
   // All of these parameters are REQUIRED.
   assert(buffer_ptr);
   assert(fetch_ptr);

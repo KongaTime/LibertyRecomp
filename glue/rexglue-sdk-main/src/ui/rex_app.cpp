@@ -589,8 +589,7 @@ void ReXApp::StartProsperoStallDump() {
 
 #if REX_PLATFORM_PS5
 namespace {
-// Every five seconds, the frames the game finished, the renderer submitted and
-// the screen showed, in the results file the player sends: where a slow run's
+// Every five seconds, in the results file the player sends, where a slow run's
 // frames stop (rex/ui/ps5_frame_counters.h)
 void StartProsperoFrameReporter() {
   static std::once_flag started;
@@ -605,26 +604,42 @@ void StartProsperoFrameReporter() {
                       static_cast<unsigned long long>(rex::chrono::Clock::QueryHostTickFrequency()));
         prospero_startup_log(line);
       }
-      using Clock = std::chrono::steady_clock;
-      uint64_t game = rex::ps5::game_frames.load(), renderer = rex::ps5::renderer_frames.load(),
-               screen = rex::ps5::screen_frames.load();
-      auto last = Clock::now();
+      // Each line: the frames the renderer submitted and the screen showed, and
+      // the share of the interval the game's main thread spent blocked in its
+      // waits and sleeps, the game's threads waited for the renderer (for room
+      // in its queue, for texture locks), the renderer waited for the game, and
+      // the host waited for the GPU (shares of several threads can pass 100%)
+      namespace ps5 = rex::ps5;
+      struct Sample {
+        uint64_t tick, renderer, screen, main_wait, queue_wait, lock_wait, locks, render_idle, gpu_wait;
+      };
+      const auto sample = [] {
+        return Sample{rex::chrono::Clock::QueryHostTickCount(), ps5::renderer_frames.load(),
+                      ps5::screen_frames.load(),  ps5::main_wait_ticks.load(),
+                      ps5::queue_wait_ticks.load(), ps5::lock_wait_ticks.load(),
+                      ps5::lock_waits.load(),     ps5::render_idle_ticks.load(),
+                      ps5::gpu_wait_ticks.load()};
+      };
+      const double frequency = double(rex::chrono::Clock::QueryHostTickFrequency());
+      Sample last = sample();
       for (;;) {
         std::this_thread::sleep_for(std::chrono::seconds(5));
-        const auto now = Clock::now();
-        const double seconds = std::chrono::duration<double>(now - last).count();
-        const uint64_t game_now = rex::ps5::game_frames.load();
-        const uint64_t renderer_now = rex::ps5::renderer_frames.load();
-        const uint64_t screen_now = rex::ps5::screen_frames.load();
-        char line[128];
+        const Sample now = sample();
+        const double ticks = double(now.tick - last.tick);
+        const double seconds = ticks / frequency;
+        const auto percent = [ticks](uint64_t delta) { return 100.0 * double(delta) / ticks; };
+        char line[256];
         std::snprintf(line, sizeof(line),
-                      "perf: game %.1f fps, renderer %.1f fps, screen %.1f fps",
-                      (game_now - game) / seconds, (renderer_now - renderer) / seconds,
-                      (screen_now - screen) / seconds);
+                      "perf: renderer %.1f fps, screen %.1f fps; main thread blocked %.0f%%; "
+                      "game waits for renderer: queue %.0f%%, %.0f texture locks/s %.0f%%; "
+                      "renderer idle %.0f%%; waiting for the GPU %.0f%%",
+                      (now.renderer - last.renderer) / seconds, (now.screen - last.screen) / seconds,
+                      percent(now.main_wait - last.main_wait),
+                      percent(now.queue_wait - last.queue_wait), (now.locks - last.locks) / seconds,
+                      percent(now.lock_wait - last.lock_wait),
+                      percent(now.render_idle - last.render_idle),
+                      percent(now.gpu_wait - last.gpu_wait));
         prospero_startup_log(line);
-        game = game_now;
-        renderer = renderer_now;
-        screen = screen_now;
         last = now;
       }
     }).detach();
