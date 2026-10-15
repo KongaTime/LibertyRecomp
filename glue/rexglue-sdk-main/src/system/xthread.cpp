@@ -903,6 +903,19 @@ void XThread::SetActiveCpu(uint8_t cpu_index) {
     pcr.prcb_data.current_cpu = cpu_index;
   }
 
+#if REX_PLATFORM_PS5
+  // PS5: by role, not by the Xbox 360's hardware thread (rex/thread.h,
+  // Ps5CpuRole); set once, as the GPU interrupt's thread comes here every frame
+  const uint64_t ps5_mask = rex::thread::Ps5CpuMask(
+      !is_guest_thread()  ? rex::thread::Ps5CpuRole::kHost
+      : main_thread_      ? rex::thread::Ps5CpuRole::kGuestMain
+                          : rex::thread::Ps5CpuRole::kGuest) & 0x1fff;
+  if (ps5_mask && ps5_mask != ps5_cpu_mask_ && thread_) {
+    ps5_cpu_mask_ = ps5_mask;
+    thread_->set_affinity_mask(ps5_mask);
+  }
+  return;
+#endif  // REX_PLATFORM_PS5
   if (rex::thread::logical_processor_count() >= 6) {
     if (!REXCVAR_GET(ignore_thread_affinities)) {
       thread_->set_affinity_mask(uint64_t(1) << cpu_index);

@@ -24,6 +24,7 @@
 #include <rex/net/socket.h>
 #include <rex/platform.h>
 #include <rex/system/xam/social_cache.h>
+#include <rex/thread.h>
 #include "live_compatibility_internal.h"
 
 #if REX_PLATFORM_WIN32
@@ -1922,6 +1923,11 @@ void LanSessionDirectory::ExpireRecords() {
 }
 
 void LanSessionDirectory::WorkerMain() {
+#if REX_PLATFORM_PS5
+  // Off the game's CPUs: started by whichever thread first needs it, it would
+  // otherwise keep that thread's CPUs, the main guest thread's one alone
+  rex::thread::Ps5PlaceCurrentThread(rex::thread::Ps5CpuRole::kHost);
+#endif
   auto next_advertisement = std::chrono::steady_clock::now();
   while (running_.load(std::memory_order_acquire)) {
     fd_set read_set;
@@ -2173,6 +2179,11 @@ void LiveCompatibilityRuntime::Shutdown() {
 }
 
 void LiveCompatibilityRuntime::HeartbeatWorkerMain() {
+#if REX_PLATFORM_PS5
+  // Off the game's CPUs: started by whichever thread first needs it, it would
+  // otherwise keep that thread's CPUs, the main guest thread's one alone
+  rex::thread::Ps5PlaceCurrentThread(rex::thread::Ps5CpuRole::kHost);
+#endif
   std::unique_lock lock(heartbeat_mutex_);
   while (!heartbeat_stopping_) {
     if (heartbeat_condition_.wait_for(lock, detail::kCommunityHeartbeatInterval,

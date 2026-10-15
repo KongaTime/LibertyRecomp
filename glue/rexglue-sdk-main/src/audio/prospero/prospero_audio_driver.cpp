@@ -8,6 +8,7 @@
 #include <rex/logging.h>
 #include <rex/memory.h>
 #include <rex/platform.h>
+#include <rex/thread.h>
 
 #if !REX_PLATFORM_PROSPERO
 #error The PS5 audio backend requires a native PS5 build.
@@ -95,6 +96,7 @@ void ProsperoAudioDriver::SubmitFrame(uint32_t samples_ptr) {
 }
 
 void ProsperoAudioDriver::OutputThreadMain() {
+  rex::thread::Ps5PlaceCurrentThread(rex::thread::Ps5CpuRole::kHost);
   while (!stopping_ && !failed_) {
     alignas(16) PcmFrame output{};
     bool had_frame = false;

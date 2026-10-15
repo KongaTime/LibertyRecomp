@@ -24,7 +24,46 @@ static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC || REX_PLATFORM_PS5, "This 
 #define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC_PRECISE
 #endif
 
+#if REX_PLATFORM_PS5
+#include <time.h>
+
+#include <ps5platform/kernel.h>
+#endif
+
 namespace rex::chrono {
+
+#if REX_PLATFORM_PS5
+namespace {
+// The host ticks are the CPU's TSC, not clock_gettime: on the console that is a
+// system call of about 1 us (R-comp's include/rcomp/fast_clock.h), and the game
+// reads its timebase (mftb, under the guest clock's lock) thousands of times a
+// frame. The TSC's rate, measured once against CLOCK_MONOTONIC; the kernel's
+// figure when it agrees, as it is exact.
+uint64_t Ps5TscFrequency() {
+  static const uint64_t frequency = [] {
+    const auto monotonic_ns = [] {
+      timespec tp;
+      clock_gettime(CLOCK_MONOTONIC, &tp);
+      return uint64_t(tp.tv_sec) * 1000000000ull + uint64_t(tp.tv_nsec);
+    };
+    const uint64_t ns_begin = monotonic_ns();
+    const uint64_t tsc_begin = __builtin_ia32_rdtsc();
+    const timespec delay = {0, 20 * 1000 * 1000};
+    nanosleep(&delay, nullptr);
+    const uint64_t ns_end = monotonic_ns();
+    const uint64_t tsc_end = __builtin_ia32_rdtsc();
+    const double measured = double(tsc_end - tsc_begin) * 1e9 / double(ns_end - ns_begin);
+    const double reported = double(sceKernelGetTscFrequency());
+    const double hz = reported > measured * 0.99 && reported < measured * 1.01 ? reported : measured;
+    // To the kHz (finer than the measurement): the guest clock's ratio to the
+    // 50 MHz timebase then reduces to small terms, which its tick deltas are
+    // multiplied by (clock.cpp, UpdateGuestClock)
+    return (uint64_t(hz) + 500) / 1000 * 1000;
+  }();
+  return frequency;
+}
+}  // namespace
+#endif  // REX_PLATFORM_PS5
 
 uint64_t Clock::host_tick_frequency_platform() {
 #ifdef __APPLE__
@@ -32,11 +71,11 @@ uint64_t Clock::host_tick_frequency_platform() {
   mach_timebase_info(&info);
   return (uint64_t)((1000000000ull * (uint64_t)info.denom) / (uint64_t)info.numer);
 #elif REX_PLATFORM_PS5
-  // The ticks are nanoseconds (host_tick_count_platform), whatever resolution
-  // the console's clock_getres reports for the clock: a coarser figure there
-  // would make every guest clock and timer run that many times too fast (as the
-  // Simpsons port found; its clock_posix.cpp fixes the unit the same way)
-  return 1000000000ull;
+  // The TSC's rate (host_tick_count_platform), not what the console's
+  // clock_getres reports: a figure other than the ticks' own would make every
+  // guest clock and timer run that many times too fast or slow (as the Simpsons
+  // port found with nanosecond ticks)
+  return Ps5TscFrequency();
 #else
   timespec res;
   int error = clock_getres(CLOCK_MONOTONIC_RAW, &res);
@@ -55,6 +94,8 @@ uint64_t Clock::host_tick_count_platform() {
   // clock_gettime(CLOCK_MONOTONIC_RAW) returns nanoseconds, which would be
   // inconsistent with the 24 MHz mach frequency and cause ~41x time acceleration.
   return mach_absolute_time();
+#elif REX_PLATFORM_PS5
+  return __builtin_ia32_rdtsc();
 #else
   timespec tp;
   int error = clock_gettime(CLOCK_MONOTONIC_RAW, &tp);

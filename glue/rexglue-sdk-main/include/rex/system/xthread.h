@@ -466,6 +466,9 @@ class XThread : public XObject {
   uint32_t stack_limit_ = 0;       // Low address
   bool guest_thread_ = false;
   bool main_thread_ = false;  // Entry-point thread
+#if REX_PLATFORM_PS5
+  uint64_t ps5_cpu_mask_ = 0;  // The CPUs SetActiveCpu last placed it on
+#endif
   // Atomic: written by the thread itself in Exit/Terminate, read cross-thread by
   // KernelState::TerminateTitle's cooperative drain.
   std::atomic<bool> running_{false};

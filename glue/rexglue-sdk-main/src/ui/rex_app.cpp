@@ -28,6 +28,7 @@
 #include <rex/audio/audio_system.h>
 #if REX_PLATFORM_PS5
 #include <rex/audio/prospero/prospero_audio_system.h>
+#include <rex/chrono/clock.h>
 #include <rex/ui/ps5_frame_counters.h>
 #include <rex/ui/startup_prospero.h>
 #include <chrono>
@@ -229,10 +230,11 @@ bool ReXApp::SetupEnvironment() {
     // Beside the startup log, in the title's state folder (writable even when
     // /app0 is a read-only image)
     log_config.log_dir = (std::filesystem::path(prospero_state_root()) / "logs").string();
-    // A title's writes to its folder are slow on the console: flushing every
-    // info line stalls whichever thread logs it. Warnings and errors still
-    // flush at once, everything else each second (InitLogging's flush_every)
-    log_config.flush_level = spdlog::level::warn;
+    // A title's writes to its folder are slow on the console (about 30 ms):
+    // flushing a line stalls whichever thread logs it, and a game can warn
+    // every frame. Errors still flush at once, everything else each second
+    // (InitLogging's flush_every)
+    log_config.flush_level = spdlog::level::err;
     if (!rex::cvar::HasNonDefaultValue("log_flush_interval")) {
       REXCVAR_SET(log_flush_interval, 1);
     }
@@ -594,6 +596,15 @@ void StartProsperoFrameReporter() {
   static std::once_flag started;
   std::call_once(started, [] {
     std::thread([] {
+      rex::thread::Ps5PlaceCurrentThread(rex::thread::Ps5CpuRole::kHost);
+      {
+        // The host clock's rate (the TSC's, clock_posix.cpp): a wrong one runs
+        // the whole game too fast or too slow
+        char line[96];
+        std::snprintf(line, sizeof(line), "clock: host ticks at %llu Hz",
+                      static_cast<unsigned long long>(rex::chrono::Clock::QueryHostTickFrequency()));
+        prospero_startup_log(line);
+      }
       using Clock = std::chrono::steady_clock;
       uint64_t game = rex::ps5::game_frames.load(), renderer = rex::ps5::renderer_frames.load(),
                screen = rex::ps5::screen_frames.load();
@@ -674,6 +685,8 @@ void ReXApp::LaunchModule() {
     }
 #if REX_PLATFORM_PS5
     StartProsperoStallDump();
+    // The window's thread off the game's CPUs (rex/thread.h, Ps5CpuRole)
+    rex::thread::Ps5PlaceCurrentThread(rex::thread::Ps5CpuRole::kHost);
 #endif
 
     module_thread_ = std::thread([this, main_thread = std::move(main_thread)]() mutable {

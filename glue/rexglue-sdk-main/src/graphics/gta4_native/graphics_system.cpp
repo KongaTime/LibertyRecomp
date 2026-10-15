@@ -1,4 +1,5 @@
 #include <rex/platform.h>
+#include <rex/thread.h>
 #if REX_PLATFORM_PS5
 #include <rex/ui/ps5_frame_counters.h>
 #include <rex/ui/startup_prospero.h>
@@ -2978,6 +2979,11 @@ bool Gta4NativeGraphicsSystem::EnqueueDeferredDiagnosticTask(std::function<void(
 }
 
 void Gta4NativeGraphicsSystem::DeferredDiagnosticWorkerMain() {
+#if REX_PLATFORM_PS5
+  // Off the game's CPUs: started by whichever thread first needs it, it would
+  // otherwise keep that thread's CPUs, the main guest thread's one alone
+  rex::thread::Ps5PlaceCurrentThread(rex::thread::Ps5CpuRole::kHost);
+#endif
   while (true) {
     std::function<void()> task;
     {
@@ -5495,6 +5501,10 @@ void Gta4NativeGraphicsSystem::TraceModernShaderDraw(
 }
 
 void Gta4NativeGraphicsSystem::RenderWorkerMain() {
+#if REX_PLATFORM_PS5
+  // A CPU of its own, off the game's (rex/thread.h, Ps5CpuRole)
+  rex::thread::Ps5PlaceCurrentThread(rex::thread::Ps5CpuRole::kRenderer);
+#endif
   std::vector<std::pair<RenderPhase, uint32_t>> render_phase_stack;
   uint64_t startup_texture_lock_count = 0;
   bool startup_present_follows_texture_lock_flush = false;

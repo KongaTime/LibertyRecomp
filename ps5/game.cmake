@@ -55,7 +55,9 @@ set(gta4_includes ${gta4}/src ${gta4}/generated ${REXGLUE_SRC}/src ${REXGLUE_SRC
 # --- The recompiled code ----------------------------------------------------------
 rex_ps5_module(gta4_recomp GENERATED ${gta4}/generated PCH ${gta4}/generated/gta4_init.h
 	INCLUDES ${gta4_includes})
-target_compile_options(gta4_recomp PRIVATE ${gta4_options})
+# At -O3, after the template's -O2: R-comp's fastest measured GTA IV build on
+# the console compiled the recompiled code so (its profiles.py, RAGE_197)
+target_compile_options(gta4_recomp PRIVATE ${gta4_options} -O3)
 target_compile_definitions(gta4_recomp PRIVATE ${gta4_definitions})
 # As on the desktop: the start-up registrar is one very large straight-line
 # function, which optimizing takes the most memory of anything here

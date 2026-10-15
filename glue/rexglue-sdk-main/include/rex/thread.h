@@ -92,6 +92,19 @@ uint32_t logical_processor_count();
 // Must be called at startup before attempting to set thread affinity.
 void EnableAffinityConfiguration();
 
+#if REX_PLATFORM_PS5
+// PS5: which of the title's CPUs (0 to 12; CPUs 2n and 2n+1 are one core) a
+// thread runs on, by what it does. The layout R-comp measured fastest for
+// GTA IV on the console (its rcomp-installer profiles.py, "arm 197"): the
+// game's main thread alone on core 0, its other threads on CPUs 2-7, the
+// renderer's worker on CPU 8 and the runtime's other threads on CPUs 9-12.
+// Each mask is a cvar (ps5_cpu_mask_*), 0 leaves that role unplaced.
+enum class Ps5CpuRole { kGuestMain, kGuest, kRenderer, kHost };
+uint64_t Ps5CpuMask(Ps5CpuRole role);
+// Places the calling thread
+void Ps5PlaceCurrentThread(Ps5CpuRole role);
+#endif  // REX_PLATFORM_PS5
+
 // Gets a stable thread-specific ID, but may not be. Use for informative
 // purposes only.
 uint32_t current_thread_system_id();

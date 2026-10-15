@@ -44,3 +44,56 @@ GTA IV title.
   `gta4-recomp` and its `gta4-native` renderer.
 - The PS4 target (`toolchains/ps4-openorbis.cmake`) describes "Vulkan via
   OpenOrbis SDL-PS4", but the PS4 has no Vulkan, so it can't draw as written.
+
+## 360-rcomp (R-comp), 2026-10-15
+
+KongaTime/360-rcomp is an unmodified fork of Phi1ow/360-rcomp at `c3640f4`. It is a
+second, separate route to GTA IV on the PS5:
+
+- its recompiled code comes from XenonRecomp run on the player's own disc;
+- it has its own kernel and XAM emulation;
+- its GPU is rexglue's Xenos emulator adapted to RADV.
+
+Its README reports GTA IV at 52-55 fps in 4K on the console. The repository
+carries no logs of those runs. Its only published console evidence
+(`evidence/ps5-f414844`) predates them and still lists GTA IV as blocked.
+
+Checked on Linux (`tools/fetch_deps.sh`, `tools/m6_setup.sh`,
+`RCOMP_SKIP_PS5=1 tools/check_all.sh`).
+
+**Pass:**
+- runtime (67 tests)
+- fps-overlay
+- launch-menu
+- tools
+- perf-tools
+
+**Blocked:** m5, xenos-vk and xex-gfx, because the host has no Vulkan driver.
+
+**Fail:**
+- cpu: needs xenia's `binutils-2.24-vmx128.patch`, which `fetch_deps.sh` skips.
+- platform: `commit_bounds` in `test_guest_memory`.
+- xenos: its patch is stored with CRLF line endings, so it applies only to a
+  CRLF checkout (Windows).
+- xenos-gpu and xenos-cp: glslang needs CMake older than 4.
+
+Problems on a fresh checkout:
+- The scripts are committed without the executable bit.
+- `fetch_deps.sh` runs `git clone` on the binutils tarball URL.
+- The PS5_RetroArch pin `18dc1059` is on no upstream branch any more. GitHub
+  serves it only when asked for it by its hash.
+
+The player's build path is Windows only (Cygwin, `ps5-native-tool.exe`). It needs
+the disc to regenerate the code.
+
+What its console measurements found, and what this title took from them:
+
+| R-comp finding | Here |
+| --- | --- |
+| The submitting thread blocks in `sceAgcSuspendPoint` | PS5_Vulkan's RADV already makes the suspend point on a thread of its own |
+| Main guest thread alone on core 0, the others on CPUs 2-7 (+11 %) | `ps5_cpu_mask_*` cvars (`rex/thread.h`, `Ps5CpuRole`) |
+| `clock_gettime` is a ~1 us system call | The host clock is the TSC (`clock_posix.cpp`); the game's `mftb` read it under a lock |
+| A write to the title folder costs ~30 ms | 512 KiB log buffer, a flush only for errors (`logging.cpp`, `rex_app.cpp`) |
+| `RADV_PERFTEST=cswave32,pswave32,gewave32`, `RADV_DEBUG=nofmask,nonggc` | `ps5_radv_perftest`, `ps5_radv_debug` cvars (`vulkan_instance.cpp`) |
+| Recompiled code at `-O3` | `ps5/game.cmake` |
+| `thread_local` is emulated (`-femulated-tls`) | Not changed |

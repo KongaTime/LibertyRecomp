@@ -71,6 +71,20 @@ static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC || REX_PLATFORM_PS5, "This 
 #define REX_HAS_SIGEV_THREAD_ID 0
 #endif
 
+#if REX_PLATFORM_PS5
+#include <ps5platform/kernel.h>
+#include <rex/cvar.h>
+
+REXCVAR_DEFINE_UINT32(ps5_cpu_mask_guest_main, 0x1, "PS5",
+                      "CPUs of the game's main thread (CPU 0 alone, its core's other CPU idle; 0 = any)");
+REXCVAR_DEFINE_UINT32(ps5_cpu_mask_guest, 0xFC, "PS5",
+                      "CPUs of the game's other threads (2-7; 0 = any)");
+REXCVAR_DEFINE_UINT32(ps5_cpu_mask_renderer, 0x100, "PS5",
+                      "CPUs of the renderer's worker thread (8; 0 = any)");
+REXCVAR_DEFINE_UINT32(ps5_cpu_mask_host, 0x1E00, "PS5",
+                      "CPUs of the runtime's other threads: audio, the window, the GPU interrupt (9-12; 0 = any)");
+#endif  // REX_PLATFORM_PS5
+
 namespace rex::thread {
 
 #if REX_PLATFORM_ANDROID
@@ -198,6 +212,33 @@ void install_signal_handler(SignalType type) {
 
 // TODO(dougvj)
 void EnableAffinityConfiguration() {}
+
+#if REX_PLATFORM_PS5
+uint64_t Ps5CpuMask(Ps5CpuRole role) {
+  switch (role) {
+    case Ps5CpuRole::kGuestMain:
+      return REXCVAR_GET(ps5_cpu_mask_guest_main);
+    case Ps5CpuRole::kGuest:
+      return REXCVAR_GET(ps5_cpu_mask_guest);
+    case Ps5CpuRole::kRenderer:
+      return REXCVAR_GET(ps5_cpu_mask_renderer);
+    case Ps5CpuRole::kHost:
+      return REXCVAR_GET(ps5_cpu_mask_host);
+  }
+  return 0;
+}
+
+void Ps5PlaceCurrentThread(Ps5CpuRole role) {
+  // Only the CPUs a title has (0x1fff, PS5_PayloadSDK's PROBE.md)
+  const uint64_t mask = Ps5CpuMask(role) & 0x1fff;
+  if (!mask) {
+    return;
+  }
+  if (const int32_t error = scePthreadSetaffinity(pthread_self(), mask); error != 0) {
+    REXLOG_WARN("PS5: CPU mask {:#x} not set ({:#x})", mask, uint32_t(error));
+  }
+}
+#endif  // REX_PLATFORM_PS5
 
 // uint64_t ticks() { return mach_absolute_time(); }
 

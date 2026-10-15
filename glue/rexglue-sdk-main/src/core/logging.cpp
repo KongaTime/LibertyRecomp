@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cstdio>
 #include <filesystem>
 #include <mutex>
 #include <unordered_map>
@@ -231,9 +232,18 @@ void InitLogging(const LogConfig& config) {
     resolved_path = NextSequentialLogPath(log_dir, config.app_name).string();
   }
   if (!resolved_path.empty()) {
+    spdlog::file_event_handlers file_events;
+#if REX_PLATFORM_PS5
+    // A write to the title's folder costs about 30 ms on the console (R-comp's
+    // gpu/vulkan/ps5/radv_title_main.c): a large buffer, so the thread that
+    // logs a line almost never pays it; the flush interval writes it out
+    file_events.after_open = [](const spdlog::filename_t&, std::FILE* file) {
+      std::setvbuf(file, nullptr, _IOFBF, 512 * 1024);
+    };
+#endif
     auto sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
         resolved_path, static_cast<size_t>(REXCVAR_GET(log_max_file_size_mb)) * 1024 * 1024,
-        static_cast<size_t>(REXCVAR_GET(log_max_files)), false);
+        static_cast<size_t>(REXCVAR_GET(log_max_files)), false, file_events);
     sink->set_level(spdlog::level::trace);
     sink->set_pattern(config.file_pattern);
     g_file_sink = sink;

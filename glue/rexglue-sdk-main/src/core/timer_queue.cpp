@@ -56,6 +56,11 @@ class TimerQueue {
   }
 
   void TimerThreadMain(std::stop_token stop_token) {
+#if REX_PLATFORM_PS5
+    // Off the game's CPUs: started by whichever thread first needs it, it would
+    // otherwise keep that thread's CPUs, the main guest thread's one alone
+    rex::thread::Ps5PlaceCurrentThread(rex::thread::Ps5CpuRole::kHost);
+#endif
     dp::sequence_t next_sequence = 0;
     const auto comp = [](const std::shared_ptr<WaitItem>& left,
                          const std::shared_ptr<WaitItem>& right) {

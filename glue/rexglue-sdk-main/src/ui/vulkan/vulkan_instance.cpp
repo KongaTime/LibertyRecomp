@@ -43,9 +43,19 @@ REXCVAR_DEFINE_BOOL(vulkan_moltenvk_synchronous_queue_submits, false, "UI/Vulkan
 // one. The PS5 blocks below are ported from TheSimpsonsGame-PS5-Builder
 // (LoZazaMastro and contributors), tools/rexglue-sdk/src/ui/vulkan/
 // vulkan_instance.cpp at 59e7086, BSD 3-Clause License (see LICENSE).
+#include <cstdlib>
 #include <cstring>
 
 #include <rex/ui/vulkan/display_prospero.h>
+
+// RADV's options, which it reads from the environment when the instance is
+// created. The defaults are what R-comp measured fastest for GTA IV on the
+// console (its rcomp-installer profiles.py, RAGE_197): wave32 compute, pixel
+// and geometry shaders, no FMASK and no NGG culling. Empty leaves RADV's own.
+REXCVAR_DEFINE_STRING(ps5_radv_perftest, "cswave32,pswave32,gewave32", "PS5",
+                      "RADV_PERFTEST for the console's Vulkan driver");
+REXCVAR_DEFINE_STRING(ps5_radv_debug, "nofmask,nonggc", "PS5",
+                      "RADV_DEBUG for the console's Vulkan driver");
 
 extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(VkInstance instance,
                                                                              const char* name);
@@ -83,6 +93,13 @@ namespace vulkan {
 std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
                                                        const bool try_enable_validation) {
 #if REX_PLATFORM_PS5
+  for (const auto& [name, value] : {std::pair{"RADV_PERFTEST", REXCVAR_GET(ps5_radv_perftest)},
+                                    std::pair{"RADV_DEBUG", REXCVAR_GET(ps5_radv_debug)}}) {
+    if (!value.empty()) {
+      setenv(name, value.c_str(), 1);
+      REXLOG_INFO("PS5: {}={}", name, value);
+    }
+  }
   // The output request, before RADV opens VideoOut.
   if (!InitializeProsperoDisplayPolicy()) {
     return nullptr;
