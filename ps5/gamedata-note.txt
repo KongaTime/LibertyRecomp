@@ -9,9 +9,10 @@ and its v8 title update. None of the game comes with this title.
                   Leave only that one file here (and this README).
   episodes/       optional: TLAD/ and TBOGT/, the episodes' files
 
-On its first launch the title unpacks the game into game/ (several minutes, and
-about twice the game's size in free space). After that it starts the game
-directly, and gamedata/ and title-update/ can be emptied.
+On its first launch the title unpacks the game into game/ (it can take an
+hour or more, and about twice the game's size in free space). After that it
+starts the game directly, and gamedata/ and title-update/ can be emptied.
+Keep game/: it is the installed game, and deleting it means installing again.
 
 A game folder already installed by Liberty Recompiled on a PC (its
 LibertyRecomp/game folder) can go in gamedata/ instead: it is used as it is.

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <system_error>
 #include <vector>
 
@@ -124,6 +125,17 @@ void ConsoleInstallDialog::OnDraw(ImGuiIO& io) {
     worker_.join();
     if (result_.success) {
       REXLOG_INFO("GTA IV console install: done");
+      // The installed game sits beside the sources it came from, and its name
+      // looks like theirs: say which one the title plays
+      if (std::FILE* note = std::fopen((install_root_ / "game" / "README.txt").c_str(), "w")) {
+        std::fputs(
+            "This folder is the installed game: Liberty Recompiled plays from it.\n"
+            "Do not delete it. Deleting it means installing again.\n\n"
+            "gamedata/ and title-update/ beside it are what it was installed from:\n"
+            "they can be emptied once the game starts.\n",
+            note);
+        std::fclose(note);
+      }
       auto complete = std::move(complete_);
       Close();
       if (complete) {
