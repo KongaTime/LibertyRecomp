@@ -639,10 +639,12 @@ std::function<void(PathConfig)> ReXApp::MakeResumeCallback() {
   return [this](PathConfig paths) {
     if (shutting_down_.load(std::memory_order_acquire))
       return;
+    LogStartupStage("app: runtime (after the paths were finalized)");
     if (!ConstructRuntime(std::move(paths))) {
       app_context().QuitFromUIThread();
       return;
     }
+    LogStartupStage("app: launching the module");
     LaunchModule();
   };
 }

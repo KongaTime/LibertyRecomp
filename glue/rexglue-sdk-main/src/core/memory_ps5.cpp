@@ -315,11 +315,13 @@ bool IsWritableExecutableMemorySupported() {
   return true;
 }
 
-void* AllocFixed(void* base_address, size_t length, AllocationType allocation_type,
+void* AllocFixed(void* requested_address, size_t requested_length, AllocationType allocation_type,
                  PageAccess access) {
   const size_t page = host_page();
   const bool commit = allocation_type != AllocationType::kReserve;
-  const uintptr_t address = reinterpret_cast<uintptr_t>(base_address);
+  void* base_address = requested_address;
+  size_t length = requested_length;
+  uintptr_t address = reinterpret_cast<uintptr_t>(base_address);
   std::lock_guard lock(g_lock);
 
   if (!base_address) {
@@ -337,10 +339,19 @@ void* AllocFixed(void* base_address, size_t length, AllocationType allocation_ty
     return placed;
   }
 
-  // Whole host pages only, as memory_posix.cpp's commits on macOS: a guest heap
-  // reconciles the guest pages sharing a host page before it asks
-  if (address % page != 0 || length % page != 0 || length == 0) {
+  if (length == 0) {
     return nullptr;
+  }
+  // Whole host pages. Upstream's guest heaps reconcile the guest pages sharing
+  // a host page before they ask; this SDK's heaps don't, and commit one 4 KiB
+  // guest page at a time, so a request for part of a host page commits the host
+  // pages it touches, as memory_mac.cpp does with Apple silicon's 16 KiB pages.
+  if (address % page != 0 || length % page != 0) {
+    const uintptr_t begin = address & ~uintptr_t(page - 1);
+    const uintptr_t end = rex::round_up(address + length, page);
+    address = begin;
+    length = size_t(end - begin);
+    base_address = reinterpret_cast<void*>(begin);
   }
 
   Mapping* mapping;
@@ -348,13 +359,13 @@ void* AllocFixed(void* base_address, size_t length, AllocationType allocation_ty
   if (FindView(address, &mapping, &view)) {
     if (!commit) {
       // A view is reserved whole when it is mapped
-      return Contains(view->base, view->length, address + length - 1) ? base_address : nullptr;
+      return Contains(view->base, view->length, address + length - 1) ? requested_address : nullptr;
     }
     if (!BackViewRange(address, address + length) ||
         !ProtectViewRange(address, address + length, access)) {
       return nullptr;
     }
-    return base_address;
+    return requested_address;
   }
 
   if (Range* range = FindRange(address)) {
@@ -364,7 +375,7 @@ void* AllocFixed(void* base_address, size_t length, AllocationType allocation_ty
     if (commit && ps5_vrange_commit(base_address, length, ShmProtection(access)) != 0) {
       return nullptr;
     }
-    return base_address;
+    return requested_address;
   }
 
   // A new reservation, exactly there or not at all
@@ -377,11 +388,24 @@ void* AllocFixed(void* base_address, size_t length, AllocationType allocation_ty
     g_ranges.pop_back();
     return nullptr;
   }
-  return base_address;
+  return requested_address;
 }
 
 bool DeallocFixed(void* base_address, size_t length, DeallocationType deallocation_type) {
-  const uintptr_t address = reinterpret_cast<uintptr_t>(base_address);
+  uintptr_t address = reinterpret_cast<uintptr_t>(base_address);
+  if (deallocation_type == DeallocationType::kDecommit && length) {
+    // Only the host pages wholly inside: one the range covers in part also
+    // holds a neighbouring guest page, which stays committed (AllocFixed)
+    const size_t page = host_page();
+    const uintptr_t begin = rex::round_up(address, page);
+    const uintptr_t end = (address + length) & ~uintptr_t(page - 1);
+    if (begin >= end) {
+      return true;
+    }
+    address = begin;
+    length = size_t(end - begin);
+    base_address = reinterpret_cast<void*>(begin);
+  }
   std::lock_guard lock(g_lock);
 
   Mapping* mapping;
@@ -423,8 +447,18 @@ bool Protect(void* base_address, size_t length, PageAccess access, PageAccess* o
     }
   }
   const size_t page = host_page();
-  const uintptr_t begin = reinterpret_cast<uintptr_t>(base_address) & ~uintptr_t(page - 1);
-  const uintptr_t end = rex::round_up(reinterpret_cast<uintptr_t>(base_address) + length, page);
+  uintptr_t begin = reinterpret_cast<uintptr_t>(base_address) & ~uintptr_t(page - 1);
+  uintptr_t end = rex::round_up(reinterpret_cast<uintptr_t>(base_address) + length, page);
+  if (access == PageAccess::kNoAccess || access == PageAccess::kReadOnly) {
+    // Taking access away: only from the host pages wholly inside, so a guest
+    // page sharing a host page with this range keeps its access (a write watch
+    // on part of a host page goes unwatched, as on Apple silicon)
+    begin = rex::round_up(reinterpret_cast<uintptr_t>(base_address), page);
+    end = (reinterpret_cast<uintptr_t>(base_address) + length) & ~uintptr_t(page - 1);
+    if (begin >= end) {
+      return true;
+    }
+  }
   std::lock_guard lock(g_lock);
 
   Mapping* mapping;

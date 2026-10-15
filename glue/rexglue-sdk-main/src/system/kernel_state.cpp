@@ -99,6 +99,10 @@ KernelState::KernelState(Runtime* emulator)
 
   // Allocate KernelGuestGlobals early so xboxkrnl module can wire exports.
   kernel_guest_globals_ = memory_->SystemHeapAlloc(sizeof(KernelGuestGlobals));
+  if (!kernel_guest_globals_) {
+    // Guest address 0 is never mapped: clearing it would fault far from the cause
+    rex::FatalError("The guest system heap could not allocate the kernel's globals");
+  }
   auto globals = memory_->TranslateVirtual<KernelGuestGlobals*>(kernel_guest_globals_);
   std::memset(globals, 0, sizeof(KernelGuestGlobals));
 
