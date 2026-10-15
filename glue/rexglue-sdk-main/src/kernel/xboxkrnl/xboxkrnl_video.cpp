@@ -32,6 +32,13 @@
 #include <rex/system/kernel_state.h>
 #include <rex/system/xtypes.h>
 #include <rex/ui/flags.h>
+#include <rex/platform.h>
+#if REX_PLATFORM_PS5
+#include <chrono>
+#include <cstdio>
+
+#include <rex/ui/startup_prospero.h>
+#endif
 
 namespace {
 // Display gamma type: 0 - linear, 1 - sRGB (CRT), 2 - BT.709 (HDTV), 3 - power
@@ -445,6 +452,27 @@ void VdSwap_entry(mapped_void buffer_ptr,      // ptr into primary ringbuffer
                   mapped_u32 frontbuffer_ptr,  // ptr to frontbuffer address
                   mapped_u32 texture_format_ptr, mapped_u32 color_space_ptr, mapped_u32 width,
                   mapped_u32 height) {
+#if REX_PLATFORM_PS5
+  {
+    // The game's frame rate in the results file every five seconds: each
+    // VdSwap is one frame the title finished (the template's results file is
+    // the one players send; the native profiler adds where the time went)
+    using Clock = std::chrono::steady_clock;
+    static Clock::time_point window_start = Clock::now();
+    static uint32_t window_frames = 0;
+    ++window_frames;
+    const auto elapsed = Clock::now() - window_start;
+    if (elapsed >= std::chrono::seconds(5)) {
+      const double seconds = std::chrono::duration<double>(elapsed).count();
+      char line[96];
+      std::snprintf(line, sizeof(line), "perf: %.1f fps (%u frames in %.1f s)",
+                    window_frames / seconds, window_frames, seconds);
+      prospero_startup_log(line);
+      window_start = Clock::now();
+      window_frames = 0;
+    }
+  }
+#endif
   // All of these parameters are REQUIRED.
   assert(buffer_ptr);
   assert(fetch_ptr);

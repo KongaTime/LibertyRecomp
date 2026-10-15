@@ -1,4 +1,7 @@
 #include <rex/platform.h>
+#if REX_PLATFORM_PS5
+#include <rex/ui/startup_prospero.h>
+#endif
 #include <rex/graphics/gta4_native/fusion_tone_lut.h>
 #include <rex/graphics/gta4_native/modern_effect_constants.h>
 #include "core/font_atlas.h"
@@ -9094,6 +9097,51 @@ void Gta4NativeGraphicsSystem::ExportNativeGpuProfile() {
       }
     }
     output.flush();
+#if REX_PLATFORM_PS5
+    // Where the time went, in the results file players send: the sampled
+    // frames' average GPU frame and the most expensive GPU and CPU ranges
+    {
+      const size_t count = native_gpu_profile_state_.export_sample_count;
+      const double ns_per_gpu_tick = native_gpu_profile_state_.timestamp_period_ns;
+      const double ms_per_cpu_tick = 1000.0 / double(host_frequency);
+      std::array<double, performance::kGpuRangeCount> gpu_ms{};
+      std::array<double, performance::kCpuRangeCount> cpu_ms{};
+      for (size_t i = 0; i < count; ++i) {
+        const performance::FrameSample& sample = native_gpu_profile_state_.export_samples[i];
+        for (size_t r = 0; r < performance::kGpuRangeCount; ++r) {
+          gpu_ms[r] += double(sample.gpu_ticks[r]) * ns_per_gpu_tick / 1.0e6;
+        }
+        for (size_t r = 0; r < performance::kCpuRangeCount; ++r) {
+          cpu_ms[r] += double(sample.cpu_ticks[r]) * ms_per_cpu_tick;
+        }
+      }
+      if (count) {
+        char line[160];
+        std::snprintf(line, sizeof(line), "perf: %zu sampled frames, GPU frame %.2f ms average",
+                      count, gpu_ms[size_t(performance::GpuRange::kFrame)] / double(count));
+        prospero_startup_log(line);
+        const auto top = [&](const auto& totals, const char* domain, auto name_of, size_t skip) {
+          std::vector<size_t> order;
+          for (size_t r = 0; r < totals.size(); ++r) {
+            if (r != skip && totals[r] > 0.0) order.push_back(r);
+          }
+          std::sort(order.begin(), order.end(),
+                    [&](size_t a, size_t b) { return totals[a] > totals[b]; });
+          for (size_t k = 0; k < order.size() && k < 6; ++k) {
+            std::snprintf(line, sizeof(line), "perf:   %s %s %.2f ms/frame", domain,
+                          name_of(order[k]), totals[order[k]] / double(count));
+            prospero_startup_log(line);
+          }
+        };
+        top(gpu_ms, "gpu",
+            [](size_t r) { return performance::GpuRangeName(performance::GpuRange(r)); },
+            size_t(performance::GpuRange::kFrame));
+        top(cpu_ms, "cpu",
+            [](size_t r) { return performance::CpuRangeName(performance::CpuRange(r)); },
+            ~size_t(0));
+      }
+    }
+#endif
 
     const std::filesystem::path temporary_csv=csv_path.string()+".partial";
     std::ofstream csv(temporary_csv, std::ios::out | std::ios::trunc);
