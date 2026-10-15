@@ -16,9 +16,11 @@
 // classes (at most a quarter wasted); bigger ones, and over-aligned ones, go
 // to the heap as they are. Blocks a class holds stay in it.
 //
-// Each block has a 16-byte header before it: the class, and for a block from
-// the heap, where the heap's block starts. operator new's blocks are
-// 16-byte aligned, as the ABI asks (the heap's are 32).
+// Each block has a header before it: the class, and for a block from the
+// heap, where the heap's block starts. operator new's blocks are aligned to
+// __STDCPP_DEFAULT_NEW_ALIGNMENT__, which is 32 on the PS5 target (not x86-64's
+// usual 16): code built for it moves new's blocks with aligned 32-byte loads
+// and stores, and a 16-byte aligned block faulted at start-up (fd7989ae).
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -30,39 +32,46 @@
 
 namespace {
 
-constexpr size_t kHeaderBytes = 16;
+// The alignment of new's blocks, and the header's size, which keeps a block
+// after it at that alignment (the heap's blocks are 32-byte aligned)
+constexpr size_t kAlignment = __STDCPP_DEFAULT_NEW_ALIGNMENT__;
+constexpr size_t kHeaderBytes = kAlignment < 16 ? 16 : kAlignment;
+static_assert(kHeaderBytes % 16 == 0 && kHeaderBytes <= 32);
 constexpr uint32_t kMagic = 0x4c524e57;
 constexpr size_t kLargestClassBytes = 64 * 1024;
-// 16..128 in steps of 16, then four steps in each power of two up to 64 KiB
-constexpr int kClassCount = 8 + (16 - 7) * 4;
+// 32..128 in steps of 32, then four steps in each power of two up to 64 KiB:
+// every class a multiple of 32, so carved blocks stay aligned
+constexpr int kClassCount = 4 + (16 - 7) * 4;
 constexpr uint32_t kHeapBlock = 0xffffffffu;
 
 struct Header {
   uint32_t magic;
   uint32_t size_class;  // kHeapBlock: base is the heap's block
   uintptr_t base;
+  unsigned char padding[kHeaderBytes - 16];
 };
 static_assert(sizeof(Header) == kHeaderBytes);
 
 constexpr size_t ClassBytes(int size_class) {
-  if (size_class < 8) {
-    return size_t(size_class + 1) * 16;
+  if (size_class < 4) {
+    return size_t(size_class + 1) * 32;
   }
-  const int power = 7 + (size_class - 8) / 4;
-  const int step = (size_class - 8) % 4 + 1;
+  const int power = 7 + (size_class - 4) / 4;
+  const int step = (size_class - 4) % 4 + 1;
   return (size_t(1) << power) + size_t(step) * (size_t(1) << (power - 2));
 }
 static_assert(ClassBytes(kClassCount - 1) == kLargestClassBytes);
+static_assert(ClassBytes(4) % 32 == 0 && ClassBytes(5) % 32 == 0);
 
 inline int ClassOf(size_t bytes) {
   if (bytes <= 128) {
-    return int((bytes + 15) >> 4) - 1;
+    return int((bytes + 31) >> 5) - 1;
   }
   // 2^power < bytes <= 2^(power + 1)
   const int power = 63 - __builtin_clzll(uint64_t(bytes - 1));
   const size_t step_bytes = size_t(1) << (power - 2);
   const size_t step = (bytes - (size_t(1) << power) + step_bytes - 1) / step_bytes;
-  return 8 + (power - 7) * 4 + int(step) - 1;
+  return 4 + (power - 7) * 4 + int(step) - 1;
 }
 
 // How many free blocks of a class a thread keeps, and moves at a time
@@ -94,16 +103,19 @@ Header* HeaderOf(void* block) {
   return reinterpret_cast<Header*>(static_cast<char*>(block) - kHeaderBytes);
 }
 
-// New blocks for a class, carved from one heap block that is never returned
+// New blocks for a class, carved from one heap block that is never returned,
+// aligned here rather than trusting the heap's alignment
 bool Carve(ThreadCache& thread, int size_class, uint32_t count) {
   const size_t stride = kHeaderBytes + ClassBytes(size_class);
-  char* slab = static_cast<char*>(std::malloc(stride * count));
-  if (!slab) {
+  char* raw = static_cast<char*>(std::malloc(stride * count + kAlignment));
+  if (!raw) {
     return false;
   }
+  char* slab = reinterpret_cast<char*>((reinterpret_cast<uintptr_t>(raw) + kAlignment - 1) &
+                                       ~uintptr_t(kAlignment - 1));
   for (uint32_t i = 0; i < count; ++i) {
     char* at = slab + stride * i;
-    *reinterpret_cast<Header*>(at) = Header{kMagic, uint32_t(size_class), 0};
+    *reinterpret_cast<Header*>(at) = Header{kMagic, uint32_t(size_class), 0, {}};
     auto* block = reinterpret_cast<FreeBlock*>(at + kHeaderBytes);
     block->next = thread.head[size_class];
     thread.head[size_class] = block;
@@ -152,8 +164,11 @@ void Spill(ThreadCache& thread, int size_class) {
 }
 
 void* AllocateFromHeap(size_t bytes, size_t alignment) {
+  if (alignment < kAlignment) {
+    alignment = kAlignment;
+  }
   // Room for the header before an aligned block
-  const size_t slack = alignment > kHeaderBytes ? alignment : kHeaderBytes;
+  const size_t slack = kHeaderBytes + alignment;
   if (bytes > SIZE_MAX - slack) {
     return nullptr;
   }
@@ -164,7 +179,7 @@ void* AllocateFromHeap(size_t bytes, size_t alignment) {
   uintptr_t user = reinterpret_cast<uintptr_t>(base) + kHeaderBytes;
   user = (user + alignment - 1) & ~uintptr_t(alignment - 1);
   *HeaderOf(reinterpret_cast<void*>(user)) =
-      Header{kMagic, kHeapBlock, reinterpret_cast<uintptr_t>(base)};
+      Header{kMagic, kHeapBlock, reinterpret_cast<uintptr_t>(base), {}};
   return reinterpret_cast<void*>(user);
 }
 
@@ -173,7 +188,7 @@ void* Allocate(size_t bytes) noexcept {
     bytes = 1;
   }
   if (bytes > kLargestClassBytes) {
-    return AllocateFromHeap(bytes, kHeaderBytes);
+    return AllocateFromHeap(bytes, kAlignment);
   }
   const int size_class = ClassOf(bytes);
   ThreadCache& thread = cache;
@@ -187,7 +202,7 @@ void* Allocate(size_t bytes) noexcept {
 }
 
 void* AllocateAligned(size_t bytes, size_t alignment) noexcept {
-  if (alignment <= kHeaderBytes) {
+  if (alignment <= kAlignment) {
     return Allocate(bytes);
   }
   return AllocateFromHeap(bytes ? bytes : 1, alignment);
