@@ -34,7 +34,7 @@ endif()
 set(TITLE_RESULTS_FILE /app0/liberty-results.txt)
 
 # Which build a results file came from: its first lines name the commit
-execute_process(COMMAND git -C ${LIBERTY_ROOT} describe --always --dirty --abbrev=8
+execute_process(COMMAND git -C ${LIBERTY_ROOT} rev-parse --short=8 HEAD
 	OUTPUT_VARIABLE liberty_ps5_build OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 string(TIMESTAMP liberty_ps5_build_time "%Y-%m-%d %H:%M" UTC)
 set(liberty_ps5_build "${liberty_ps5_build} ${liberty_ps5_build_time}")
