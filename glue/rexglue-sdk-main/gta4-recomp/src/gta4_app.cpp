@@ -709,6 +709,11 @@ void ApplyPs5DefaultSettings() {
       {"gta4_scenario_ped_density_scale", "1.0"},
       {"gta4_streaming_budget_scale", "1.0"},
       {"gta4_reflection_resolution", "original"},
+      // The native profiler starts with the first frame: on the console it
+      // samples one frame in 30, not every frame, and writes its report
+      // (userdata/LibertyRecomp/Diagnostics) after 120 samples
+      {"gta4_profile_native_interval", "30"},
+      {"gta4_profile_native_samples", "120"},
   };
   for (const auto& [name, value] : kDefaults) {
     if (rex::cvar::HasNonDefaultValue(name)) {

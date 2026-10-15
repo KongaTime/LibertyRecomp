@@ -1,3 +1,4 @@
+#include <rex/platform.h>
 #include <rex/graphics/gta4_native/fusion_tone_lut.h>
 #include <rex/graphics/gta4_native/modern_effect_constants.h>
 #include "core/font_atlas.h"
@@ -15854,10 +15855,13 @@ Gta4NativeGraphicsSystem::NativeTextureImage* Gta4NativeGraphicsSystem::GetOrCre
     view_info.components.g = VK_COMPONENT_SWIZZLE_ONE;
     view_info.components.b = VK_COMPONENT_SWIZZLE_ONE;
     view_info.components.a = VK_COMPONENT_SWIZZLE_R;
-  } else if (vulkan_device->properties().portabilitySubset ||
+  } else if (REX_PLATFORM_PS5 || vulkan_device->properties().portabilitySubset ||
              !vulkan_device->properties().imageViewFormatSwizzle) {
     // Ordinary native portability views deliberately retain the established
-    // identity policy even when font-only swizzle support is enabled.
+    // identity policy even when font-only swizzle support is enabled. The PS5's
+    // RADV takes the same policy: the textures' uploads and shaders were made
+    // and checked against identity views (MoltenVK), and RADV applying the
+    // guest swizzle in the view as well swapped red and blue in 8888 textures.
     host_swizzle = xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA;
     view_info.components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
                             VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
