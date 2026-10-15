@@ -97,7 +97,8 @@ void EnableAffinityConfiguration();
 // thread runs on, by what it does. The layout R-comp measured fastest for
 // GTA IV on the console (its rcomp-installer profiles.py, "arm 197"): the
 // game's main thread alone on core 0, its other threads on CPUs 2-7, the
-// renderer's worker on CPU 8 and the runtime's other threads on CPUs 9-12.
+// renderer's worker alone on core 4 (CPU 8; it bounds the frame in the city)
+// and the runtime's other threads on CPUs 10-12.
 // Each mask is a cvar (ps5_cpu_mask_*), 0 leaves that role unplaced.
 enum class Ps5CpuRole { kGuestMain, kGuest, kRenderer, kHost };
 uint64_t Ps5CpuMask(Ps5CpuRole role);

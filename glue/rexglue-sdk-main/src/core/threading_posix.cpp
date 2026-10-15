@@ -80,9 +80,9 @@ REXCVAR_DEFINE_UINT32(ps5_cpu_mask_guest_main, 0x1, "PS5",
 REXCVAR_DEFINE_UINT32(ps5_cpu_mask_guest, 0xFC, "PS5",
                       "CPUs of the game's other threads (2-7; 0 = any)");
 REXCVAR_DEFINE_UINT32(ps5_cpu_mask_renderer, 0x100, "PS5",
-                      "CPUs of the renderer's worker thread (8; 0 = any)");
-REXCVAR_DEFINE_UINT32(ps5_cpu_mask_host, 0x1E00, "PS5",
-                      "CPUs of the runtime's other threads: audio, the window, the GPU interrupt (9-12; 0 = any)");
+                      "CPUs of the renderer's worker thread (8, its core's other CPU idle; 0 = any)");
+REXCVAR_DEFINE_UINT32(ps5_cpu_mask_host, 0x1C00, "PS5",
+                      "CPUs of the runtime's other threads: audio, the window, the GPU interrupt (10-12; 0 = any)");
 #endif  // REX_PLATFORM_PS5
 
 namespace rex::thread {

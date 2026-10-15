@@ -11,8 +11,8 @@
 // about a third of its time in the city at 4-16 fps, build d1069a98.
 //
 // Here a freed block goes to the freeing thread's cache, and caches pass
-// blocks to each other through a shared depot in batches, so a lock is taken
-// once a batch instead of once a block. Blocks up to 64 KiB come in size
+// blocks to each other through a shared depot in whole lists, so a lock is
+// taken once a list instead of once a block. Blocks up to 64 KiB come in size
 // classes (at most a quarter wasted); bigger ones, and over-aligned ones, go
 // to the heap as they are. Blocks a class holds stay in it.
 //
@@ -74,15 +74,20 @@ inline int ClassOf(size_t bytes) {
   return 4 + (power - 7) * 4 + int(step) - 1;
 }
 
-// How many free blocks of a class a thread keeps, and moves at a time
+// How many free blocks of a class a thread keeps before it hands them on
 constexpr uint32_t CacheLimit(int size_class) {
   const size_t limit = (512 * 1024) / ClassBytes(size_class);
   return uint32_t(limit < 8 ? 8 : limit > 512 ? 512 : limit);
 }
 
+// A free block, and in the first block of a chain the depot holds, the next
+// chain and how many blocks this one has (every class has room for them)
 struct FreeBlock {
   FreeBlock* next;
+  FreeBlock* next_chain;
+  uint32_t chain_count;
 };
+static_assert(sizeof(FreeBlock) <= 32);
 
 struct ThreadCache {
   FreeBlock* head[kClassCount];
@@ -92,10 +97,13 @@ struct ThreadCache {
 // cache's blocks behind (at most CacheLimit of each class)
 thread_local ThreadCache cache;
 
+// Whole chains, as threads handed them on: a thread's list moves in one step,
+// never walked (the renderer's worker frees far more than it allocates, and
+// cutting a batch off its list walked hundreds of cold blocks: 7 % of its
+// time in build e441f37d)
 struct Depot {
   std::mutex lock;
-  FreeBlock* head = nullptr;
-  size_t count = 0;
+  FreeBlock* chains = nullptr;
 };
 Depot depots[kClassCount];
 
@@ -124,43 +132,36 @@ bool Carve(ThreadCache& thread, int size_class, uint32_t count) {
   return true;
 }
 
+// For a thread whose list of the class is empty: a chain from the depot, or
+// new blocks
 bool Refill(ThreadCache& thread, int size_class) {
-  const uint32_t batch = CacheLimit(size_class) / 2;
   Depot& depot = depots[size_class];
+  FreeBlock* chain;
   {
     std::lock_guard lock(depot.lock);
-    uint32_t taken = 0;
-    while (depot.head && taken < batch) {
-      FreeBlock* block = depot.head;
-      depot.head = block->next;
-      block->next = thread.head[size_class];
-      thread.head[size_class] = block;
-      ++taken;
-    }
-    depot.count -= taken;
-    thread.count[size_class] += taken;
-    if (taken) {
-      return true;
+    chain = depot.chains;
+    if (chain) {
+      depot.chains = chain->next_chain;
     }
   }
-  return Carve(thread, size_class, batch);
+  if (chain) {
+    thread.head[size_class] = chain;
+    thread.count[size_class] = chain->chain_count;
+    return true;
+  }
+  return Carve(thread, size_class, CacheLimit(size_class) / 2);
 }
 
+// The thread's whole list of the class to the depot, as one chain
 void Spill(ThreadCache& thread, int size_class) {
-  const uint32_t batch = CacheLimit(size_class) / 2;
-  // The batch's chain, off the thread's list
-  FreeBlock* first = thread.head[size_class];
-  FreeBlock* last = first;
-  for (uint32_t i = 1; i < batch; ++i) {
-    last = last->next;
-  }
-  thread.head[size_class] = last->next;
-  thread.count[size_class] -= batch;
+  FreeBlock* chain = thread.head[size_class];
+  chain->chain_count = thread.count[size_class];
+  thread.head[size_class] = nullptr;
+  thread.count[size_class] = 0;
   Depot& depot = depots[size_class];
   std::lock_guard lock(depot.lock);
-  last->next = depot.head;
-  depot.head = first;
-  depot.count += batch;
+  chain->next_chain = depot.chains;
+  depot.chains = chain;
 }
 
 void* AllocateFromHeap(size_t bytes, size_t alignment) {
@@ -227,7 +228,7 @@ void Deallocate(void* pointer) noexcept {
   auto* block = static_cast<FreeBlock*>(pointer);
   block->next = thread.head[size_class];
   thread.head[size_class] = block;
-  if (++thread.count[size_class] > CacheLimit(size_class)) {
+  if (++thread.count[size_class] >= CacheLimit(size_class)) {
     Spill(thread, size_class);
   }
 }
