@@ -7,7 +7,9 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <rex/graphics/gta4_native/title_commands.h>
@@ -691,7 +693,40 @@ std::optional<rex::PathConfig> GTA4App::OnFinalizePaths(
 #endif
 }
 
+#if REX_PLATFORM_PS5
+namespace {
+// The console's defaults where the player has chosen nothing (their choices
+// in the settings file stand): 1080p, not the display's 4K, and the Xbox 360's
+// draw distance, density, streaming and reflections, not the PC's raised ones
+void ApplyPs5DefaultSettings() {
+  static constexpr std::pair<std::string_view, std::string_view> kDefaults[] = {
+      {"resolution", "1080p"},
+      {"gta4_draw_distance_scale", "1.0"},
+      {"gta4_shadow_distance_scale", "1.0"},
+      {"gta4_traffic_density_scale", "1.0"},
+      {"gta4_parked_car_density_scale", "1.0"},
+      {"gta4_ped_density_scale", "1.0"},
+      {"gta4_scenario_ped_density_scale", "1.0"},
+      {"gta4_streaming_budget_scale", "1.0"},
+      {"gta4_reflection_resolution", "original"},
+  };
+  for (const auto& [name, value] : kDefaults) {
+    if (rex::cvar::HasNonDefaultValue(name)) {
+      REXLOG_INFO("PS5 settings: {} = {} (the player's)", name, rex::cvar::GetFlagByName(name));
+    } else if (rex::cvar::SetFlagByName(name, value)) {
+      REXLOG_INFO("PS5 settings: {} = {}", name, value);
+    } else {
+      REXLOG_WARN("PS5 settings: could not set {} to {}", name, value);
+    }
+  }
+}
+}  // namespace
+#endif
+
 void GTA4App::OnPreSetup(rex::RuntimeConfig& config) {
+#if REX_PLATFORM_PS5
+  ApplyPs5DefaultSettings();
+#endif
   rex::input::mnk::SetNativeControllerCompatibilityBindings(
       gta4::input::KeyboardControllerBindings());
   if (!config.graphics && config.gpu_plugin.empty()) {

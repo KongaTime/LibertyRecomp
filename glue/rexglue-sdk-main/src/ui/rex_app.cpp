@@ -224,6 +224,13 @@ bool ReXApp::SetupEnvironment() {
     // Beside the startup log, in the title's state folder (writable even when
     // /app0 is a read-only image)
     log_config.log_dir = (std::filesystem::path(prospero_state_root()) / "logs").string();
+    // A title's writes to its folder are slow on the console: flushing every
+    // info line stalls whichever thread logs it. Warnings and errors still
+    // flush at once, everything else each second (InitLogging's flush_every)
+    log_config.flush_level = spdlog::level::warn;
+    if (!rex::cvar::HasNonDefaultValue("log_flush_interval")) {
+      REXCVAR_SET(log_flush_interval, 1);
+    }
 #elif REX_PLATFORM_MAC
     // A macOS bundle's Contents/MacOS directory is code-signing territory.
     // Runtime logs placed there make a subsequent incremental build fail to
