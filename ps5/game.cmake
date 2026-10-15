@@ -14,7 +14,9 @@
 #     install dialog and the community backend and voice audio (curl, OpenSSL,
 #     SDL), which ps5/host/platform_services_ps5.cpp stands in for;
 #   - ps5/host/gpu_static_ps5.cpp, which registers the gta4-native renderer the
-#     runtime build linked statically (out/ps5-amd64/librexgpu-gta4-native.a).
+#     runtime build linked statically (out/ps5-amd64/librexgpu-gta4-native.a);
+#   - ps5/host/allocator_ps5.cpp, the title's operator new and delete (objects,
+#     so they replace libc++abi's weak ones).
 #
 # The game's files are not in the title: players copy the game folder of a PC
 # install into the title's gamedata/ folder (ps5/README.md).
@@ -83,7 +85,8 @@ set(gta4_app_sources
 	input/context_touch_activity_layout.cpp input/context_touch_overlay.cpp gta4_touch_guest_hooks.cpp)
 list(TRANSFORM gta4_app_sources PREPEND ${gta4}/src/)
 add_library(gta4_app OBJECT ${gta4_app_sources} ${REXGLUE_SRC}/thirdparty/crypto/rijndael-alg-fst.c
-	${TITLE_DIR}/host/platform_services_ps5.cpp ${TITLE_DIR}/host/gpu_static_ps5.cpp ${REX_APP_SOURCE})
+	${TITLE_DIR}/host/platform_services_ps5.cpp ${TITLE_DIR}/host/gpu_static_ps5.cpp
+	${TITLE_DIR}/host/allocator_ps5.cpp ${REX_APP_SOURCE})
 target_include_directories(gta4_app PRIVATE ${gta4_includes})
 rex_ps5_settings(gta4_app)
 target_compile_options(gta4_app PRIVATE ${gta4_options})
